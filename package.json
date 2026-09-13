@@ -1,0 +1,14 @@
+{
+  "name": "medipulse-qr",
+  "version": "1.0.0",
+  "description": "Emergency Patient QR Medical Record & Clinical Follow-up Healthcare Portal",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "./bin/node server.js",
+    "test": "./bin/node scripts/test-all.js"
+  },
+  "keywords": ["healthcare", "qr-code", "patient-records", "ehr", "triage", "medications", "sqlite"],
+  "author": "MediPulse Health",
+  "license": "MIT"
+}

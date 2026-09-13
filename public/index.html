@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediPulse QR - Emergency Medical & Clinical Follow-up Gateway</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Tesseract.js for in-browser OCR (with zero-failure fallback) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="/css/styles.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            teal: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              800: '#115e59',
+              900: '#134e4a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 flex flex-col selection:bg-teal-100 selection:text-teal-900">
+
+  <!-- ========================================================================= -->
+  <!-- TOP CLINICAL NAVIGATION BAR (No-print) -->
+  <!-- ========================================================================= -->
+  <header class="no-print sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16 gap-4">
+        
+        <!-- Brand Logo -->
+        <div class="flex items-center gap-3 cursor-pointer" onclick="app.showPatientView()">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-teal-600 to-cyan-500 flex items-center justify-center text-white shadow-md shadow-teal-500/20">
+            <i data-lucide="qr-code" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-black text-xl tracking-tight text-slate-900">MediPulse<span class="text-teal-600">QR</span></span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200">
+                <span class="pulse-dot mr-1.5"></span> Live SQLite
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 hidden sm:block">Emergency Care & Clinical Follow-up Gateway</p>
+          </div>
+        </div>
+
+        <!-- Center Patient Selector Dropdown -->
+        <div class="hidden md:flex items-center gap-2 bg-slate-100/80 p-1.5 rounded-xl border border-slate-200">
+          <span class="text-xs font-semibold text-slate-500 px-2 flex items-center gap-1">
+            <i data-lucide="users" class="w-3.5 h-3.5"></i> Demo Profile:
+          </span>
+          <select id="quickPatientSelect" onchange="app.loadPatient(this.value)" class="text-sm font-semibold bg-white border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 text-slate-800 shadow-sm cursor-pointer">
+            <option value="MED-EV-8091">Eleanor Vance (68y • A+ • Cardiac/Diabetes)</option>
+            <option value="MED-MC-4120">Marcus Chen (29y • O- • Anaphylaxis/Asthma)</option>
+            <option value="MED-JO-9502">James O'Connor (74y • B+ • Warfarin/DNR)</option>
+            <option value="MED-SM-7334">Sophia Martinez (42y • AB+ • Multiple Sclerosis)</option>
+            <option value="MED-MP-2291">Maya Patel (11y • O+ • Pediatric T1D/Celiac)</option>
+          </select>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center gap-2 sm:gap-3">
+          
+          <!-- Scan / Upload Medical Document Button (New Feature!) -->
+          <button onclick="app.openTranscriptionModal()" class="flex items-center gap-2 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-sm transition hover:scale-[1.02] active:scale-[0.98]" title="Scan or Upload Medical Document & Extract Records">
+            <i data-lucide="file-scan" class="w-4 h-4"></i>
+            <span class="hidden lg:inline">Transcribe Image</span>
+          </button>
+
+          <!-- Scan QR Button -->
+          <button onclick="app.openScannerModal()" class="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-sm font-semibold shadow-sm transition hover:scale-[1.02] active:scale-[0.98]">
+            <i data-lucide="scan-line" class="w-4 h-4 text-teal-400"></i>
+            <span class="hidden sm:inline">Scan QR</span>
+          </button>
+
+          <!-- Directory Button -->
+          <button onclick="app.showDirectoryView()" class="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-xl text-sm font-medium transition">
+            <i data-lucide="folder-search" class="w-4 h-4"></i>
+            <span class="hidden md:inline">Directory</span>
+          </button>
+
+          <!-- Ideas Showcase Button -->
+          <button onclick="app.showIdeasView()" class="flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-2 rounded-xl text-sm font-semibold transition">
+            <i data-lucide="sparkles" class="w-4 h-4 text-amber-600"></i>
+            <span class="hidden md:inline">Ideas</span>
+          </button>
+
+          <!-- Reset Demo Button -->
+          <button onclick="app.resetDemoData()" title="Reset Demo Data" class="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
+            <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- MAIN APPLICATION CONTAINER -->
+  <!-- ========================================================================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- Loading State -->
+    <div id="loadingIndicator" class="no-print hidden flex flex-col items-center justify-center py-20 space-y-4">
+      <div class="w-12 h-12 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin"></div>
+      <p class="text-sm font-medium text-slate-500 animate-pulse">Retrieving secure medical records from SQLite...</p>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 1: PATIENT CLINICAL FILE (Main View) -->
+    <!-- ========================================================================= -->
+    <div id="patientView" class="space-y-6">
+
+      <!-- EMERGENCY CRITICAL TRIAGE BANNER (Prominently displayed upon QR scan) -->
+      <section id="emergencyTriageBanner" class="rounded-2xl p-5 sm:p-6 shadow-sm border transition-all duration-300"></section>
+
+      <!-- PATIENT IDENTITY & DEMOGRAPHICS CARD -->
+      <section class="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-sm">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          
+          <div class="flex items-start sm:items-center gap-4">
+            <div class="relative">
+              <img id="patientAvatar" src="" alt="Patient Avatar" class="w-20 h-20 rounded-2xl object-cover border-2 border-slate-200 shadow-inner">
+              <span id="patientStatusBadge" class="absolute -bottom-1 -right-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500 text-white border-2 border-white shadow-sm">
+                Active
+              </span>
+            </div>
+            <div>
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                <h1 id="patientFullName" class="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">--</h1>
+                <span id="patientQrBadge" class="font-mono text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg border border-slate-200 flex items-center gap-1">
+                  <i data-lucide="qr-code" class="w-3.5 h-3.5 text-teal-600"></i> <span id="patientQrText">--</span>
+                </span>
+              </div>
+              <div class="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs sm:text-sm text-slate-500">
+                <span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i> DOB: <strong id="patientDob" class="text-slate-700 font-semibold">--</strong> (<span id="patientAge">--</span> yrs)</span>
+                <span class="flex items-center gap-1"><i data-lucide="user" class="w-3.5 h-3.5 text-slate-400"></i> Gender: <strong id="patientGender" class="text-slate-700 font-semibold">--</strong></span>
+                <span class="flex items-center gap-1"><i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400"></i> <span id="patientAddress">--</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Action Buttons for Clinicians -->
+          <div class="no-print flex flex-wrap items-center gap-2.5">
+            <button onclick="app.openTranscriptionModal()" class="flex items-center gap-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-200 px-3.5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
+              <i data-lucide="file-scan" class="w-4 h-4 text-cyan-600"></i>
+              <span>Transcribe Image</span>
+            </button>
+            <button onclick="app.openFollowUpModal()" class="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
+              <i data-lucide="stethoscope" class="w-4 h-4"></i>
+              <span>+ Clinical Follow-up</span>
+            </button>
+            <button onclick="app.openVitalsModal()" class="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3.5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
+              <i data-lucide="activity" class="w-4 h-4 text-teal-600"></i>
+              <span>Log Vitals</span>
+            </button>
+            <button onclick="app.openMedicationModal()" class="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3.5 py-2.5 rounded-xl text-sm font-semibold shadow-sm transition">
+              <i data-lucide="pill" class="w-4 h-4 text-teal-600"></i>
+              <span>+ Add Pill</span>
+            </button>
+            <button onclick="app.switchTab('wristband')" class="p-2.5 text-slate-600 hover:text-slate-900 border border-slate-300 rounded-xl hover:bg-slate-50 transition" title="View Printable Wristband & ID Card">
+              <i data-lucide="printer" class="w-4 h-4"></i>
+            </button>
+          </div>
+
+        </div>
+
+        <!-- Clinical Metadata Bar -->
+        <div class="mt-5 pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+          <div>
+            <span class="text-slate-400 block font-medium">Primary Physician</span>
+            <span id="patientDoctor" class="font-semibold text-slate-800 truncate block">--</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block font-medium">Insurance Policy</span>
+            <span id="patientInsurance" class="font-semibold text-slate-800 truncate block">--</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block font-medium">Emergency Contacts</span>
+            <span id="patientContactSummary" class="font-semibold text-slate-800 truncate block">--</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block font-medium">Last QR Scan</span>
+            <span id="patientLastScan" class="font-semibold text-slate-800 truncate block">--</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- CLINICAL DETAIL TABS -->
+      <section class="no-print">
+        <div class="border-b border-slate-200">
+          <nav class="flex space-x-2 sm:space-x-4 overflow-x-auto pb-px" aria-label="Tabs">
+            
+            <!-- Tab: Medications -->
+            <button onclick="app.switchTab('medications')" id="tabBtn-medications" class="tab-btn active inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-teal-600 text-teal-700 whitespace-nowrap">
+              <i data-lucide="pill" class="w-4 h-4"></i>
+              <span>Medication Chart</span>
+              <span id="badgeMedsCount" class="ml-1 px-2 py-0.5 text-xs rounded-full bg-teal-100 text-teal-800 font-bold">0</span>
+            </button>
+
+            <!-- Tab: Trends & Analytics (NEW!) -->
+            <button onclick="app.switchTab('trends')" id="tabBtn-trends" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="trending-up" class="w-4 h-4 text-cyan-600"></i>
+              <span>Trend Analysis</span>
+              <span class="px-1.5 py-0.5 text-[10px] font-black uppercase rounded bg-cyan-100 text-cyan-800">Charts</span>
+            </button>
+
+            <!-- Tab: Allergy Tracker (NEW!) -->
+            <button onclick="app.switchTab('allergies')" id="tabBtn-allergies" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="shield-alert" class="w-4 h-4 text-rose-500"></i>
+              <span>Allergy Tracker</span>
+              <span id="badgeAllergiesCount" class="ml-1 px-2 py-0.5 text-xs rounded-full bg-rose-100 text-rose-800 font-bold">0</span>
+            </button>
+
+            <!-- Tab: Medical History -->
+            <button onclick="app.switchTab('history')" id="tabBtn-history" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="clipboard-list" class="w-4 h-4"></i>
+              <span>Medical History</span>
+              <span id="badgeHistoryCount" class="ml-1 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700 font-bold">0</span>
+            </button>
+
+            <!-- Tab: Vitals & Labs -->
+            <button onclick="app.switchTab('vitals')" id="tabBtn-vitals" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="activity" class="w-4 h-4"></i>
+              <span>Bedside Vitals & Labs</span>
+            </button>
+
+            <!-- Tab: Clinical Follow-ups -->
+            <button onclick="app.switchTab('notes')" id="tabBtn-notes" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="file-text" class="w-4 h-4"></i>
+              <span>Clinical Follow-ups</span>
+              <span id="badgeNotesCount" class="ml-1 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700 font-bold">0</span>
+            </button>
+
+            <!-- Tab: Scanned Documents -->
+            <button onclick="app.switchTab('scannedDocs')" id="tabBtn-scannedDocs" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="file-scan" class="w-4 h-4"></i>
+              <span>Scanned Documents</span>
+              <span id="badgeDocsCount" class="ml-1 px-2 py-0.5 text-xs rounded-full bg-slate-100 text-slate-700 font-bold">0</span>
+            </button>
+
+            <!-- Tab: Wristband & ID -->
+            <button onclick="app.switchTab('wristband')" id="tabBtn-wristband" class="tab-btn inline-flex items-center gap-2 py-3 px-3.5 border-b-2 font-semibold text-sm border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap">
+              <i data-lucide="badge" class="w-4 h-4"></i>
+              <span>Wristband & Card</span>
+            </button>
+
+          </nav>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 1: MEDICATIONS & ACTIVE/OLD CHART WITH TITRATION & REACTIVATION -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-medications" class="tab-content space-y-5">
+        
+        <!-- Medication Segment Toggle & Filters -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div class="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+            <button onclick="app.setMedsSegment('active')" id="segBtn-active" class="px-4 py-2 text-xs font-bold rounded-lg bg-white text-teal-800 shadow-sm transition">
+              🟢 Active Medications (<span id="countActiveMeds">0</span>)
+            </button>
+            <button onclick="app.setMedsSegment('historical')" id="segBtn-historical" class="px-4 py-2 text-xs font-bold rounded-lg text-slate-600 hover:text-slate-900 transition">
+              ⚪ Historical / Discontinued (<span id="countOldMeds">0</span>)
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-400">Filter Schedule:</span>
+            <button onclick="app.filterMeds('all')" id="medFilter-all" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-600 text-white">All</button>
+            <button onclick="app.filterMeds('morning')" id="medFilter-morning" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Morning</button>
+            <button onclick="app.filterMeds('evening')" id="medFilter-evening" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Evening</button>
+            <button onclick="app.filterMeds('prn')" id="medFilter-prn" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">PRN / As Needed</button>
+            <button onclick="app.openMedicationModal()" class="ml-2 text-xs font-bold text-white bg-teal-600 hover:bg-teal-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Pill
+            </button>
+          </div>
+        </div>
+
+        <!-- Medications List Grid -->
+        <div id="medicationsList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 2: TREND ANALYSIS & LONGITUDINAL CHARTS (NEW!) -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-trends" class="tab-content hidden space-y-6">
+        
+        <div class="bg-gradient-to-r from-teal-900 via-slate-900 to-cyan-950 text-white p-5 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-lg font-bold flex items-center gap-2">
+              <i data-lucide="trending-up" class="w-5 h-5 text-cyan-400"></i> Longitudinal Vital Signs & Biomarker Trend Analysis
+            </h2>
+            <p class="text-xs text-slate-300">Tracks trajectory against clinical reference targets to evaluate therapeutic efficacy.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold text-slate-300">Time Range:</span>
+            <button onclick="app.filterTrendRange('all')" id="trendRange-all" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-teal-500 text-white">All Time</button>
+            <button onclick="app.filterTrendRange('90d')" id="trendRange-90d" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200">90 Days</button>
+            <button onclick="app.filterTrendRange('30d')" id="trendRange-30d" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 text-slate-200">30 Days</button>
+          </div>
+        </div>
+
+        <!-- 1. Blood Pressure Dual-Series Chart -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-2">
+          <div class="flex items-center justify-between">
+            <h3 class="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+              <i data-lucide="activity" class="w-4 h-4 text-rose-500"></i> Blood Pressure Trajectory (Systolic / Diastolic)
+            </h3>
+            <span class="text-[11px] font-mono text-slate-400">Unit: mmHg</span>
+          </div>
+          <div id="chartContainer-bp"></div>
+        </div>
+
+        <!-- 2. Dual Column: Heart Rate & Blood Glucose -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <!-- Heart Rate Chart -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-2">
+            <div id="chartContainer-hr"></div>
+          </div>
+          <!-- Blood Glucose Chart -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-2">
+            <div id="chartContainer-glucose"></div>
+          </div>
+        </div>
+
+        <!-- 3. Dual Column: SpO2 Oxygen & Body Temperature -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <!-- SpO2 Chart -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-2">
+            <div id="chartContainer-spo2"></div>
+          </div>
+          <!-- Body Temperature Chart -->
+          <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-2">
+            <div id="chartContainer-temp"></div>
+          </div>
+        </div>
+
+        <!-- 4. Biomarker Trajectory Cards (HbA1c, INR, eGFR) -->
+        <div class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+          <h3 class="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+            <i data-lucide="flask-conical" class="w-4 h-4 text-teal-600"></i> Key Diagnostic Biomarker Trajectories
+          </h3>
+          <div id="biomarkerTimelineList" class="grid grid-cols-1 sm:grid-cols-3 gap-4"></div>
+        </div>
+
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 3: ALLERGY TRACKER & RISK MATRIX (NEW!) -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-allergies" class="tab-content hidden space-y-5">
+        
+        <!-- Risk Matrix Summary Bar -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="bg-rose-50 border border-rose-200 rounded-2xl p-4">
+            <span class="text-xs font-bold text-rose-800 uppercase tracking-wider block">Life-Threatening</span>
+            <div class="text-2xl font-black text-rose-600 mt-1 font-mono" id="matrixCountLife">0</div>
+            <span class="text-[10px] text-rose-600 font-medium">Anaphylaxis / Airway Risk</span>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+            <span class="text-xs font-bold text-amber-800 uppercase tracking-wider block">Severe Allergies</span>
+            <div class="text-2xl font-black text-amber-600 mt-1 font-mono" id="matrixCountSevere">0</div>
+            <span class="text-[10px] text-amber-700 font-medium">Angioedema / Bleeding</span>
+          </div>
+
+          <div class="bg-yellow-50 border border-yellow-200 rounded-2xl p-4">
+            <span class="text-xs font-bold text-yellow-800 uppercase tracking-wider block">Moderate Allergies</span>
+            <div class="text-2xl font-black text-yellow-700 mt-1 font-mono" id="matrixCountModerate">0</div>
+            <span class="text-[10px] text-yellow-700 font-medium">Urticaria / Systemic</span>
+          </div>
+
+          <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4">
+            <span class="text-xs font-bold text-blue-800 uppercase tracking-wider block">Mild Allergies</span>
+            <div class="text-2xl font-black text-blue-600 mt-1 font-mono" id="matrixCountMild">0</div>
+            <span class="text-[10px] text-blue-600 font-medium">Localized / Pruritus</span>
+          </div>
+        </div>
+
+        <!-- Allergy Controls & Category Filter -->
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-xs font-semibold text-slate-400 mr-1">Category:</span>
+            <button onclick="app.filterAllergiesCategory('')" id="algCat-all" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-600 text-white">All</button>
+            <button onclick="app.filterAllergiesCategory('Drug')" id="algCat-Drug" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Drug / Antibiotic</button>
+            <button onclick="app.filterAllergiesCategory('Food')" id="algCat-Food" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Food / Nutrition</button>
+            <button onclick="app.filterAllergiesCategory('Environmental')" id="algCat-Environmental" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Environmental</button>
+            <button onclick="app.filterAllergiesCategory('Material')" id="algCat-Material" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200">Material (Latex)</button>
+          </div>
+          <button onclick="app.openAllergyModal()" class="text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add New Allergy
+          </button>
+        </div>
+
+        <!-- Allergy Cards Grid -->
+        <div id="allergiesDetailList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 4: MEDICAL HISTORY & DIAGNOSES -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-history" class="tab-content hidden space-y-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="clipboard-list" class="w-5 h-5 text-teal-600"></i> Chronic Conditions & Diagnostic Timeline
+            </h2>
+            <p class="text-xs text-slate-500">Historical diagnoses, ICD-10 codings, and specialized managing clinics.</p>
+          </div>
+        </div>
+        <div id="medicalHistoryList" class="space-y-3"></div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 5: BEDSIDE VITALS & LABS -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-vitals" class="tab-content hidden space-y-6">
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="heart-pulse" class="w-5 h-5 text-rose-500"></i> Latest Bedside Vital Signs
+            </h2>
+            <button onclick="app.openVitalsModal()" class="text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg border border-teal-200 flex items-center gap-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Measurement
+            </button>
+          </div>
+          <div id="vitalsCardGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4"></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <h3 class="text-base font-bold text-slate-900 flex items-center gap-2">
+            <i data-lucide="flask-conical" class="w-5 h-5 text-teal-600"></i> Recent Diagnostic Laboratory Panels
+          </h3>
+          <div id="labReportsList" class="space-y-3"></div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+            <i data-lucide="history" class="w-4 h-4 text-slate-500"></i> Bedside Vitals Logbook
+          </h3>
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-xs text-left">
+              <thead class="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                <tr>
+                  <th class="py-2.5 px-3">Date / Time</th>
+                  <th class="py-2.5 px-3">Blood Pressure</th>
+                  <th class="py-2.5 px-3">Heart Rate</th>
+                  <th class="py-2.5 px-3">SpO2</th>
+                  <th class="py-2.5 px-3">Temperature</th>
+                  <th class="py-2.5 px-3">Blood Glucose</th>
+                  <th class="py-2.5 px-3">Clinician / Observer</th>
+                </tr>
+              </thead>
+              <tbody id="vitalsTableBody" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 6: CLINICAL FOLLOW-UPS & NURSING NOTES -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-notes" class="tab-content hidden space-y-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="stethoscope" class="w-5 h-5 text-teal-600"></i> Doctor & Nurse Clinical SOAP Follow-ups
+            </h2>
+            <p class="text-xs text-slate-500">Bedside rounds, triage follow-ups, and specialty assessments.</p>
+          </div>
+          <button onclick="app.openFollowUpModal()" class="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+            <span>Log New Follow-up Note</span>
+          </button>
+        </div>
+        <div id="clinicalNotesList" class="space-y-4"></div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 7: SCANNED DOCUMENTS ARCHIVE (NEW!) -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-scannedDocs" class="tab-content hidden space-y-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="file-scan" class="w-5 h-5 text-cyan-600"></i> Scanned Medical Documents & Records
+            </h2>
+            <p class="text-xs text-slate-500">Archived prescription slips, lab sheets, and discharge summaries transcribed into this record.</p>
+          </div>
+          <button onclick="app.openTranscriptionModal()" class="text-xs font-bold text-white bg-cyan-600 hover:bg-cyan-700 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Scan New Document
+          </button>
+        </div>
+        <div id="scannedDocsList" class="space-y-3"></div>
+      </section>
+
+      <!-- ===================================================================== -->
+      <!-- TAB 8: DIGITAL WRISTBAND & EMERGENCY WALLET CARD -->
+      <!-- ===================================================================== -->
+      <section id="tabContent-wristband" class="tab-content hidden space-y-6">
+        <div class="no-print bg-white p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="badge" class="w-5 h-5 text-teal-600"></i> Scannable Wristband & Emergency Wallet Card
+            </h2>
+            <p class="text-xs text-slate-500">Designed for hospital patient bands, wallet cards, or emergency badges.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="window.print()" class="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm transition">
+              <i data-lucide="printer" class="w-4 h-4"></i>
+              <span>Print Badge / Wristband</span>
+            </button>
+            <button onclick="app.downloadQrCode()" class="flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-sm transition">
+              <i data-lucide="download" class="w-4 h-4 text-teal-600"></i>
+              <span>Download QR</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 1. HOSPITAL EMERGENCY WRISTBAND PREVIEW -->
+        <div class="space-y-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block">Format A: Hospital Emergency Wristband</span>
+          <div class="wristband-print-container bg-white border-2 border-slate-300 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-4">
+              <div id="wristbandQrContainer" class="p-2 bg-white rounded-xl border border-slate-200 shadow-sm"></div>
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-black px-2 py-0.5 bg-teal-100 text-teal-800 rounded">HOSPITAL PATIENT ID</span>
+                  <span id="wbBloodType" class="text-xs font-black px-2 py-0.5 bg-rose-100 text-rose-800 rounded">BLOOD: --</span>
+                  <span id="wbDnr" class="text-xs font-black px-2 py-0.5 bg-slate-800 text-white rounded hidden">DNR</span>
+                </div>
+                <h3 id="wbPatientName" class="text-xl font-black text-slate-900 mt-1">--</h3>
+                <p class="text-xs text-slate-500 font-mono">DOB: <span id="wbDob">--</span> • MRN: <span id="wbMrn">--</span></p>
+                <p id="wbAllergyWarning" class="text-xs font-bold text-rose-600 mt-1 flex items-center gap-1">
+                  <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> ALLERGY ALERT: <span id="wbAllergyText">--</span>
+                </p>
+              </div>
+            </div>
+            <div class="hidden md:flex flex-col items-end border-l border-slate-200 pl-6 space-y-1">
+              <span class="text-[10px] text-slate-400 font-mono tracking-widest uppercase">SCAN FOR FULL MEDICAL HISTORY</span>
+              <div class="flex items-center h-10 gap-0.5 opacity-70">
+                <div class="w-1 h-full bg-slate-800"></div><div class="w-0.5 h-full bg-slate-800"></div>
+                <div class="w-1.5 h-full bg-slate-800"></div><div class="w-0.5 h-full bg-slate-800"></div>
+                <div class="w-2 h-full bg-slate-800"></div><div class="w-1 h-full bg-slate-800"></div>
+                <div class="w-0.5 h-full bg-slate-800"></div><div class="w-1.5 h-full bg-slate-800"></div>
+                <div class="w-1 h-full bg-slate-800"></div><div class="w-0.5 h-full bg-slate-800"></div>
+                <div class="w-2 h-full bg-slate-800"></div>
+              </div>
+              <span id="wbFooterCode" class="text-[10px] font-mono text-slate-500">MEDIPULSE-QR-VERIFIED</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. EMERGENCY WALLET MEDICAL ID CARD -->
+        <div class="space-y-2 pt-4">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block">Format B: Wallet Emergency ID Card</span>
+          <div class="id-card-print-container bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 text-white p-4 shadow-xl flex flex-col justify-between relative overflow-hidden">
+            <div class="flex items-start justify-between">
+              <div>
+                <div class="flex items-center gap-1.5">
+                  <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                  <span class="text-[11px] font-black uppercase tracking-wider text-rose-400">EMERGENCY MEDICAL CARD</span>
+                </div>
+                <h4 id="cardPatientName" class="text-base font-extrabold text-white mt-0.5">--</h4>
+                <p class="text-[10px] text-slate-300 font-mono">DOB: <span id="cardDob">--</span> • BLOOD: <strong id="cardBlood" class="text-amber-300">--</strong></p>
+              </div>
+              <div id="cardQrContainer" class="p-1 bg-white rounded-lg"></div>
+            </div>
+            <div class="text-[9px] text-slate-300 border-t border-slate-700 pt-2 space-y-0.5">
+              <p><strong class="text-rose-400">CRITICAL ALLERGIES:</strong> <span id="cardAllergies">--</span></p>
+              <p><strong class="text-teal-400">EMERGENCY CONTACT:</strong> <span id="cardContact">--</span></p>
+              <p><strong class="text-slate-400">IN AN EMERGENCY:</strong> Scan QR code with smartphone camera for medication list & directives.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 2: PATIENT DIRECTORY -->
+    <!-- ========================================================================= -->
+    <div id="directoryView" class="hidden space-y-6">
+      <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <i data-lucide="users" class="w-6 h-6 text-teal-600"></i> Patient Registry & Directory
+            </h2>
+            <p class="text-xs text-slate-500">Search patient records, view active medications, and generate digital credentials.</p>
+          </div>
+          <div class="relative w-full sm:w-72">
+            <i data-lucide="search" class="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input type="text" id="directorySearchInput" oninput="app.searchPatients(this.value)" placeholder="Search name, QR code, condition..." class="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+          <span class="text-xs font-semibold text-slate-400">Blood Type Filter:</span>
+          <button onclick="app.filterDirectoryBlood('')" class="blood-filter-btn px-2.5 py-1 text-xs font-semibold rounded-lg bg-teal-600 text-white" data-blood="">All</button>
+          <button onclick="app.filterDirectoryBlood('O-')" class="blood-filter-btn px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" data-blood="O-">O- (Universal)</button>
+          <button onclick="app.filterDirectoryBlood('A+')" class="blood-filter-btn px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" data-blood="A+">A+</button>
+          <button onclick="app.filterDirectoryBlood('B+')" class="blood-filter-btn px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" data-blood="B+">B+</button>
+          <button onclick="app.filterDirectoryBlood('AB+')" class="blood-filter-btn px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" data-blood="AB+">AB+</button>
+          <button onclick="app.filterDirectoryBlood('O+')" class="blood-filter-btn px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200" data-blood="O+">O+</button>
+        </div>
+      </div>
+      <div id="directoryList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 3: IDEAS & ARCHITECTURAL ENHANCEMENTS SHOWCASE -->
+    <!-- ========================================================================= -->
+    <div id="ideasView" class="hidden space-y-6">
+      <div class="bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 text-white rounded-3xl p-6 sm:p-10 shadow-xl relative overflow-hidden">
+        <div class="relative z-10 max-w-3xl space-y-3">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-teal-500/20 text-teal-300 border border-teal-500/30">
+            <i data-lucide="lightbulb" class="w-4 h-4"></i> System Engineering & Strategic Roadmap
+          </div>
+          <h2 class="text-2xl sm:text-4xl font-extrabold tracking-tight">How to Make MediPulse QR Better</h2>
+          <p class="text-sm sm:text-base text-slate-300">
+            Comprehensive medical gateway architectures designed for hospital-grade resilience, zero-connectivity disaster response, and EHR interoperability.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- 6 ideas as implemented earlier -->
+        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold">1</div>
+          <h3 class="text-lg font-bold text-slate-900">Zero-Connectivity Cryptographic QR (Offline PWA)</h3>
+          <p class="text-sm text-slate-600 leading-relaxed">Compress critical emergency data directly inside the QR code using CBOR and Base45 with ECDSA digital signatures, enabling paramedics to triage with zero cellular signal.</p>
+        </div>
+        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">2</div>
+          <h3 class="text-lg font-bold text-slate-900">"Break-Glass" Emergency Access & Family Notifications</h3>
+          <p class="text-sm text-slate-600 leading-relaxed">Log GPS coordinates and dispatch an automated SMS to the patient proxy whenever emergency triage access occurs.</p>
+        </div>
+        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">3</div>
+          <h3 class="text-lg font-bold text-slate-900">Two-Tier Granular Privacy Architecture</h3>
+          <p class="text-sm text-slate-600 leading-relaxed">Public tier displays blood type and anaphylaxis; authenticated clinical tier unlocks psychiatric notes and prescription titrations.</p>
+        </div>
+        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">4</div>
+          <h3 class="text-lg font-bold text-slate-900">SMART-on-FHIR & HL7 Hospital Systems Bridge</h3>
+          <p class="text-sm text-slate-600 leading-relaxed">Bi-directional integration with Epic Systems and Cerner EHR platforms via standard FHIR v4 APIs.</p>
+        </div>
+        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-cyan-50 text-cyan-600 flex items-center justify-center font-bold">5</div>
+          <h3 class="text-lg font-bold text-slate-900">Bedside AI Drug-Drug & Allergy Conflict Engine</h3>
+          <p class="text-sm text-slate-600 leading-relaxed">Automated safety checker alerts physicians if prescribing a medication that conflicts with an existing allergy or anticoagulant.</p>
+        </div>
+        <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-3">
+          <div class="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">6</div>
+          <h3 class="text-lg font-bold text-slate-900">Dynamic Anti-Tamper Rotating QR & NFC Smart Band</h3>
+          <p class="text-sm text-slate-600 leading-relaxed">TOTP rotating QR codes (refreshed every 60s) paired with an embedded NFC chip for tap-to-open verification.</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: DOCUMENT SCANNING, IMAGE UPLOAD & OCR TRANSCRIPTION (NEW!) -->
+  <!-- ========================================================================= -->
+  <div id="transcriptionModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-slate-50/60">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-cyan-100 text-cyan-700 flex items-center justify-center">
+            <i data-lucide="file-scan" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-extrabold text-slate-900">Scan & Transcribe Medical Document</h3>
+            <p class="text-xs text-slate-500">Upload prescription slips, discharge summaries, or lab panels to auto-extract records into patient history.</p>
+          </div>
+        </div>
+        <button onclick="app.closeTranscriptionModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body (Split Layout: Upload/Preview on Left, Extracted Entities on Right) -->
+      <div class="flex-1 p-4 sm:p-6 overflow-y-auto space-y-5">
+        
+        <!-- Step 1: Pre-loaded Demo Documents for Instant Zero-Friction Testing -->
+        <div class="bg-cyan-50/70 border border-cyan-200/80 rounded-2xl p-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-cyan-900 flex items-center gap-1.5">
+              <i data-lucide="sparkles" class="w-4 h-4 text-cyan-600"></i> One-Click Sample Medical Documents (Test Immediately):
+            </span>
+            <span class="text-[11px] text-cyan-700">Select any sample to transcribe instantly</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button onclick="app.loadSampleDocument('doc-rx-1')" class="text-left p-2.5 bg-white hover:bg-cyan-100/50 rounded-xl border border-cyan-200 transition text-xs shadow-sm">
+              <strong class="text-slate-900 block font-bold">1. Outpatient Rx Slip</strong>
+              <span class="text-[11px] text-slate-500">Metformin 1000mg, Lisinopril 20mg, Atorvastatin</span>
+            </button>
+            <button onclick="app.loadSampleDocument('doc-discharge-2')" class="text-left p-2.5 bg-white hover:bg-cyan-100/50 rounded-xl border border-cyan-200 transition text-xs shadow-sm">
+              <strong class="text-slate-900 block font-bold">2. ER Triage & Allergy Sheet</strong>
+              <span class="text-[11px] text-slate-500">EpiPen, Albuterol, Peanut Anaphylaxis</span>
+            </button>
+            <button onclick="app.loadSampleDocument('doc-cardio-3')" class="text-left p-2.5 bg-white hover:bg-cyan-100/50 rounded-xl border border-cyan-200 transition text-xs shadow-sm">
+              <strong class="text-slate-900 block font-bold">3. Anticoagulation Sheet</strong>
+              <span class="text-[11px] text-slate-500">Warfarin 5mg, INR 2.4, CKD Stage 3b</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Step 2: Upload Zone & Document Image Preview -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          
+          <!-- Left Column: Document Image & OCR Raw Text -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">Document Scan / Photo</label>
+              <label class="cursor-pointer text-xs font-semibold text-teal-700 hover:text-teal-800 flex items-center gap-1">
+                <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload Your Own Document
+                <input type="file" id="docUploadInput" accept="image/*" class="hidden" onchange="app.handleDocumentFileUpload(event)">
+              </label>
+            </div>
+
+            <!-- Image preview or Document visual canvas -->
+            <div id="docPreviewContainer" class="bg-slate-900 text-slate-200 rounded-2xl p-4 min-h-[220px] max-h-[260px] overflow-y-auto border border-slate-800 flex flex-col justify-center items-center text-center">
+              <div id="docPlaceholder" class="space-y-2 text-slate-400">
+                <i data-lucide="file-image" class="w-10 h-10 mx-auto opacity-50"></i>
+                <p class="text-xs font-medium">Select a sample document above or drag & drop any prescription slip / lab report.</p>
+              </div>
+              <img id="docImagePreview" class="hidden max-h-[240px] rounded-lg object-contain shadow" alt="Document Preview">
+            </div>
+
+            <!-- OCR Raw Transcribed Text Box (Editable if needed) -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-bold text-slate-700">Transcribed Text (OCR Engine Output)</span>
+                <button onclick="app.reparseTranscriptionText()" class="text-[11px] font-semibold text-teal-700 hover:underline flex items-center gap-1">
+                  <i data-lucide="refresh-cw" class="w-3 h-3"></i> Re-parse
+                </button>
+              </div>
+              <textarea id="rawTranscriptionText" rows="6" oninput="app.reparseTranscriptionText()" placeholder="Transcribed clinical text will appear here. You can also paste or edit text directly..." class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+            </div>
+          </div>
+
+          <!-- Right Column: Structured Extracted Clinical Entities (Selectable Checklist) -->
+          <div class="space-y-3 flex flex-col">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <i data-lucide="check-square" class="w-3.5 h-3.5 text-teal-600"></i> Extracted Clinical Findings
+              </label>
+              <span id="extractedCountBadge" class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800">0 Records Detected</span>
+            </div>
+
+            <div id="extractedEntitiesContainer" class="flex-1 bg-slate-50/80 rounded-2xl border border-slate-200 p-3.5 space-y-4 max-h-[460px] overflow-y-auto">
+              <div class="text-center py-16 text-xs text-slate-400">
+                No document loaded yet. Choose a sample or upload an image to view parsed clinical entities.
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="flex items-center justify-between p-4 sm:p-5 border-t border-slate-100 bg-slate-50/50">
+        <span class="text-xs text-slate-500 hidden sm:inline">Selected records will be saved to SQLite and added to Eleanor's medical record.</span>
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="app.closeTranscriptionModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Cancel
+          </button>
+          <button type="button" onclick="app.commitSelectedExtractedRecords()" class="px-5 py-2 text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 rounded-xl shadow-md transition flex items-center gap-2">
+            <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+            <span>Commit to Patient History</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: MEDICATION DOSAGE CHANGE / TITRATION (NEW!) -->
+  <!-- ========================================================================= -->
+  <div id="titrationModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+      
+      <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center">
+            <i data-lucide="sliders" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Change Medication Dosage (Titration)</h3>
+            <p class="text-xs text-slate-500">Adjust dosage with clinical audit rationale.</p>
+          </div>
+        </div>
+        <button onclick="app.closeTitrationModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.submitTitration(event)" class="p-6 space-y-4">
+        <input type="hidden" id="titrateMedId">
+        
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <span class="text-xs text-slate-400 font-semibold block">Target Medication:</span>
+          <strong id="titrateDrugName" class="text-sm text-slate-900 block font-extrabold mt-0.5">--</strong>
+          <span class="text-xs text-teal-700 font-mono">Current Dosage: <strong id="titrateCurrentDosage">--</strong></span>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">New Dosage <span class="text-rose-500">*</span></label>
+          <input type="text" id="titrateNewDosage" required placeholder="e.g. 1000 mg or 25 mg" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-bold font-mono">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Updated Frequency / Schedule</label>
+          <input type="text" id="titrateNewFrequency" placeholder="e.g. Twice daily with meals" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Clinical Rationale / Reason <span class="text-rose-500">*</span></label>
+          <textarea id="titrateReason" required rows="2" placeholder="e.g. Blood glucose consistently elevated > 180 mg/dL; titrating up to optimize HbA1c..." class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Prescribing Physician</label>
+          <input type="text" id="titrateChangedBy" value="Dr. Sarah Jenkins, MD" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="app.closeTitrationModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-xl shadow-sm transition">
+            Apply Titration
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: ADD NEW ALLERGY (NEW!) -->
+  <!-- ========================================================================= -->
+  <div id="allergyModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+      
+      <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+            <i data-lucide="shield-alert" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Record New Allergy</h3>
+            <p class="text-xs text-slate-500">Add to patient allergy matrix & emergency banner.</p>
+          </div>
+        </div>
+        <button onclick="app.closeAllergyModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.submitNewAllergy(event)" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Allergen / Substance <span class="text-rose-500">*</span></label>
+          <input type="text" id="algName" required placeholder="e.g. Ciprofloxacin or Strawberries" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Severity Level</label>
+            <select id="algSeverity" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500">
+              <option value="Life-Threatening">Life-Threatening (Anaphylaxis)</option>
+              <option value="Severe">Severe (Angioedema / Wheeze)</option>
+              <option value="Moderate" selected>Moderate (Urticaria / Rash)</option>
+              <option value="Mild">Mild (Pruritus / Sneezing)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Category</label>
+            <select id="algCategory" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500">
+              <option value="Drug">Drug / Antibiotic</option>
+              <option value="Food">Food / Nutrition</option>
+              <option value="Environmental">Environmental</option>
+              <option value="Material">Material (Latex)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Clinical Reaction Description</label>
+          <input type="text" id="algReaction" placeholder="e.g. Bronchospasm, facial swelling, hives" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Clinical Notes & Precautions</label>
+          <textarea id="algNotes" rows="2" placeholder="e.g. Avoid all cross-reactive fluoroquinolones..." class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-rose-500"></textarea>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="app.closeAllergyModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm transition">
+            Save to Allergy Tracker
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: LIVE CAMERA QR SCANNER & MANUAL CODE INPUT -->
+  <!-- ========================================================================= -->
+  <div id="scannerModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center">
+            <i data-lucide="scan-line" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Scan Patient QR Code</h3>
+            <p class="text-xs text-slate-500">Live Camera, Image Upload, or Direct Code Lookup</p>
+          </div>
+        </div>
+        <button onclick="app.closeScannerModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-6 space-y-5">
+        <div class="relative bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center h-64 shadow-inner">
+          <video id="scannerVideo" class="w-full h-full object-cover"></video>
+          <div class="scanner-overlay pointer-events-none">
+            <div class="scanner-laser"></div>
+            <div class="scanner-corner corner-tl"></div>
+            <div class="scanner-corner corner-tr"></div>
+            <div class="scanner-corner corner-bl"></div>
+            <div class="scanner-corner corner-br"></div>
+          </div>
+          <div id="cameraStatusPill" class="absolute bottom-3 px-3 py-1 rounded-full text-xs font-semibold bg-black/60 text-white backdrop-blur flex items-center gap-1.5">
+            <span class="pulse-dot"></span> Camera Active • Point at QR
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <button id="btnToggleCamera" onclick="app.toggleCameraMode()" class="text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Switch Camera
+          </button>
+          <label class="cursor-pointer text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload QR Image
+            <input type="file" id="qrFileInput" accept="image/*" class="hidden" onchange="app.handleQrFileUpload(event)">
+          </label>
+        </div>
+
+        <div class="relative flex items-center justify-center">
+          <div class="border-t border-slate-200 w-full"></div>
+          <span class="bg-white px-3 text-xs text-slate-400 font-semibold uppercase">Or Enter Code</span>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex gap-2">
+            <input type="text" id="manualCodeInput" placeholder="e.g. MED-EV-8091 or pat-8091" class="flex-1 px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono">
+            <button onclick="app.submitManualCode()" class="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-sm font-semibold rounded-xl transition">
+              Open
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+            <span>Quick test:</span>
+            <button onclick="app.quickLoadCode('MED-EV-8091')" class="font-mono text-teal-700 underline hover:text-teal-900">MED-EV-8091</button>
+            <span>•</span>
+            <button onclick="app.quickLoadCode('MED-MC-4120')" class="font-mono text-teal-700 underline hover:text-teal-900">MED-MC-4120</button>
+            <span>•</span>
+            <button onclick="app.quickLoadCode('MED-JO-9502')" class="font-mono text-teal-700 underline hover:text-teal-900">MED-JO-9502</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: CLINICAL FOLLOW-UP NOTE (Doctor / Nurse) -->
+  <!-- ========================================================================= -->
+  <div id="followUpModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center">
+            <i data-lucide="stethoscope" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Add Clinical Follow-up Note</h3>
+            <p class="text-xs text-slate-500">Document bedside rounds, assessment, and treatment plan.</p>
+          </div>
+        </div>
+        <button onclick="app.closeFollowUpModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.submitFollowUpNote(event)" class="p-6 space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Clinician Name</label>
+            <input type="text" id="noteAuthorName" required value="Dr. Sarah Jenkins, MD" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Role / Specialization</label>
+            <input type="text" id="noteAuthorRole" required value="Attending Cardiologist" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Clinical Facility / Ward</label>
+            <input type="text" id="noteFacility" required value="Memorial Hospital - Acute Triage" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Visit / Encounter Type</label>
+            <select id="noteVisitType" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+              <option value="Bedside Follow-up Round">Bedside Follow-up Round</option>
+              <option value="ER Triage Assessment">ER Triage Assessment</option>
+              <option value="Routine Clinic Consult">Routine Clinic Consult</option>
+              <option value="Post-Op Discharge Review">Post-Op Discharge Review</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Clinical Assessment <span class="text-rose-500">*</span></label>
+          <textarea id="noteAssessment" required rows="2" placeholder="Patient stable, blood pressure responding well to ACE inhibitor..." class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Follow-up Plan & Orders <span class="text-rose-500">*</span></label>
+          <textarea id="notePlan" required rows="2" placeholder="Continue current pill dosage, order repeat electrolyte panel..." class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500"></textarea>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="app.closeFollowUpModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-xl shadow-sm transition">
+            Save Clinical Note
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: LOG BEDSIDE VITALS -->
+  <!-- ========================================================================= -->
+  <div id="vitalsModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+            <i data-lucide="activity" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Record Bedside Vitals</h3>
+            <p class="text-xs text-slate-500">Live vital statistics saved directly to SQLite</p>
+          </div>
+        </div>
+        <button onclick="app.closeVitalsModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.submitVitalsLog(event)" class="p-6 space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Blood Pressure</label>
+            <input type="text" id="vitBp" placeholder="120/80 mmHg" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Heart Rate (BPM)</label>
+            <input type="number" id="vitHr" placeholder="72" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">SpO2 Oxygen (%)</label>
+            <input type="number" id="vitSpo2" placeholder="98" min="50" max="100" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Temperature (°C)</label>
+            <input type="number" step="0.1" id="vitTemp" placeholder="36.8" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Blood Glucose (mg/dL)</label>
+            <input type="number" id="vitGlucose" placeholder="110" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Observer Name</label>
+            <input type="text" id="vitObserver" value="Nurse Rachel Miller, RN" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="app.closeVitalsModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-sm transition">
+            Save Vitals
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: PRESCRIBE / ADD PILL -->
+  <!-- ========================================================================= -->
+  <div id="medicationModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50/50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center">
+            <i data-lucide="pill" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">Prescribe / Add Medication</h3>
+            <p class="text-xs text-slate-500">Add a pill to the patient's active medication record.</p>
+          </div>
+        </div>
+        <button onclick="app.closeMedicationModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form onsubmit="app.submitNewMedication(event)" class="p-6 space-y-4">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Drug / Trade Name <span class="text-rose-500">*</span></label>
+            <input type="text" id="medName" required placeholder="e.g. Amlodipine Besylate" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Dosage <span class="text-rose-500">*</span></label>
+            <input type="text" id="medDosage" required placeholder="e.g. 5 mg" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Form</label>
+            <select id="medForm" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+              <option value="Tablet">Tablet</option>
+              <option value="Capsule">Capsule</option>
+              <option value="Inhaler">Inhaler</option>
+              <option value="Injection">Injection</option>
+              <option value="Liquid">Liquid Solution</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Frequency</label>
+            <input type="text" id="medFrequency" required placeholder="e.g. Once daily in the morning" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Clinical Indication / Purpose</label>
+          <input type="text" id="medPurpose" placeholder="e.g. Antihypertensive calcium channel blocker" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Pill Appearance / Imprint</label>
+            <input type="text" id="medAppearance" placeholder="e.g. White round, debossed 'AML 5'" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Prescribing Doctor</label>
+            <input type="text" id="medDoctor" value="Dr. Sarah Jenkins, MD" class="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-teal-500">
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+          <button type="button" onclick="app.closeMedicationModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition">
+            Cancel
+          </button>
+          <button type="submit" class="px-5 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-700 rounded-xl shadow-sm transition">
+            Add to Active Pills
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- Scripts -->
+  <script src="/js/qr-generator.js"></script>
+  <script src="/js/qr-scanner.js"></script>
+  <script src="/js/clinical-parser.js"></script>
+  <script src="/js/charts.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+    });
+  </script>
+</body>
+</html>

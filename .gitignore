@@ -1,0 +1,17 @@
+# Dependencies & local runtimes
+node_modules/
+bin/
+
+# SQLite Database local files
+data/*.sqlite
+data/*.sqlite-journal
+data/*.sqlite-wal
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs & scratch
+*.log
+scratch/
+.system_generated/

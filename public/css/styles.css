@@ -1,0 +1,171 @@
+/* MediPulse QR Clinical Design System */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --primary: #0d9488;
+  --primary-hover: #0f766e;
+  --primary-light: #ccfbf1;
+  --primary-dark: #134e4a;
+  --emergency-red: #e11d48;
+  --emergency-bg: #fff1f2;
+  --emergency-border: #fecdd3;
+  --alert-amber: #d97706;
+  --alert-amber-bg: #fffbeb;
+  --card-border: #e2e8f0;
+  --card-bg: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scanner target box animations */
+.scanner-overlay {
+  position: relative;
+  width: 280px;
+  height: 280px;
+  border: 2px solid rgba(13, 148, 136, 0.4);
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.scanner-laser {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, rgba(13, 148, 136, 0) 0%, #14b8a6 50%, rgba(13, 148, 136, 0) 100%);
+  box-shadow: 0 0 15px #14b8a6;
+  animation: scanLaser 2.2s ease-in-out infinite;
+}
+
+@keyframes scanLaser {
+  0% { top: 5%; opacity: 0.8; }
+  50% { top: 90%; opacity: 1; }
+  100% { top: 5%; opacity: 0.8; }
+}
+
+.scanner-corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: #0d9488;
+  border-style: solid;
+}
+
+.corner-tl { top: 12px; left: 12px; border-width: 4px 0 0 4px; border-top-left-radius: 8px; }
+.corner-tr { top: 12px; right: 12px; border-width: 4px 4px 0 0; border-top-right-radius: 8px; }
+.corner-bl { bottom: 12px; left: 12px; border-width: 0 0 4px 4px; border-bottom-left-radius: 8px; }
+.corner-br { bottom: 12px; right: 12px; border-width: 0 4px 4px 0; border-bottom-right-radius: 8px; }
+
+/* Pulse badges */
+.pulse-dot {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10b981;
+}
+
+.pulse-dot::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background-color: inherit;
+  animation: pulseAnim 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes pulseAnim {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Pill visual pill avatar */
+.pill-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  font-size: 10px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 2px rgba(255,255,255,0.8), 0 2px 4px rgba(0,0,0,0.06);
+}
+
+/* Titration timeline badge */
+.titration-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+/* PRINT STYLES - Specifically for wristbands and ID cards */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .wristband-print-container {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    page-break-inside: avoid;
+  }
+
+  .id-card-print-container {
+    width: 340px;
+    height: 215px;
+    border: 2px solid #000;
+    border-radius: 12px;
+    margin: 20px auto;
+    page-break-inside: avoid;
+  }
+}
