@@ -101,10 +101,17 @@ Run the test suite at any time:
 
 ---
 
-## 🛠️ Technology Stack
+## ☁️ Cloudflare Pages Hosting
 
-- **Backend**: Node.js 24 (`agy-node`) with native zero-dependency HTTP REST API.
-- **Database**: Relational SQLite 3 powered by native `node:sqlite` (`DatabaseSync`).
-- **Frontend**: Responsive Single Page Application, Tailwind CSS, Lucide icons, Tesseract.js.
-- **Clinical Intelligence**: Native JavaScript Medical NLP Entity Extractor (`public/js/clinical-parser.js`).
-- **Visualizations**: Interactive SVG Clinical Trend Charts Engine (`public/js/charts.js`).
+This repository is optimized for deployment on **Cloudflare Pages**:
+
+1. In Cloudflare Dashboard, go to **Workers & Pages** ➔ **Create application** ➔ **Pages** ➔ **Connect to Git**.
+2. Select repository: `SICILLIA17/medipulse-qr`.
+3. Set build configuration:
+   - **Framework preset**: None
+   - **Build command**: (leave empty)
+   - **Build output directory**: `public`
+4. Deploy!
+
+Cloudflare Pages automatically serves the static frontend from `public/`, routes client-side URLs via `public/_redirects`, and executes serverless edge APIs located in `functions/api/[[path]].js`. Every future `git push` to `main` will automatically trigger a new deployment on Cloudflare!
+
