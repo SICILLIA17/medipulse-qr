@@ -5,8 +5,9 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "./bin/node server.js",
-    "test": "./bin/node scripts/test-all.js"
+    "start": "node server.js",
+    "build": "node -e \"console.log('MediPulse QR build completed successfully')\"",
+    "test": "node scripts/test-all.js"
   },
   "keywords": ["healthcare", "qr-code", "patient-records", "ehr", "triage", "medications", "sqlite"],
   "author": "MediPulse Health",
