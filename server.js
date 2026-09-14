@@ -257,6 +257,14 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 201, { success: true, audit });
       }
 
+      // Transcribe AI endpoint (local dev fallback)
+      if (pathname === '/api/transcribe-ai' && req.method === 'POST') {
+        return sendJson(res, 200, {
+          fallbackToClient: true,
+          message: 'Local Node.js environment detected - using client-side OCR engine or sample parser'
+        });
+      }
+
       return sendJson(res, 404, { error: 'Endpoint not found' });
     }
 

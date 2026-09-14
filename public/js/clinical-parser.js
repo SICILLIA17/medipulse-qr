@@ -39,7 +39,11 @@
         'lantus', 'baqsimi', 'glucagon', 'amlodipine', 'omeprazole',
         'losartan', 'gabapentin', 'hydrochlorothiazide', 'amoxicillin',
         'azithromycin', 'prednisone', 'ibuprofen', 'acetaminophen',
-        'pantoprazole', 'escitalopram', 'sertraline', 'clopidogrel'
+        'pantoprazole', 'escitalopram', 'sertraline', 'clopidogrel',
+        'apixaban', 'rivaroxaban', 'carvedilol', 'spironolactone', 'glipizide',
+        'sitagliptin', 'empagliflozin', 'semaglutide', 'tramadol', 'morphine',
+        'oxycodone', 'montelukast', 'fluticasone', 'loratadine', 'ciprofloxacin',
+        'doxycycline', 'cephalexin', 'fluoxetine', 'citalopram', 'paracetamol'
       ];
     }
 
@@ -60,16 +64,40 @@
 
     extractMedications(text) {
       const medications = [];
-      const lines = text.split('\n');
+      const lines = text.replace(/\r\n/g, '\n').split('\n');
+      const seenNames = new Set();
 
-      for (let line of lines) {
-        const trimmed = line.trim();
+      let inMedSection = false;
+
+      for (let rawLine of lines) {
+        let trimmed = rawLine.trim();
         if (!trimmed) continue;
 
-        // Pattern 1: Rx: DrugName Dosage Form Frequency Instructions
-        // e.g. "Rx: Metformin HCl 1000mg Tablet Twice daily with meals"
+        // Check for section headers
+        if (/^(?:MEDICATIONS?|CURRENT MEDICATIONS?|PRESCRIPTIONS?|RX LIST|DRUGS?)\s*[:\-]?$/i.test(trimmed)) {
+          inMedSection = true;
+          continue;
+        }
+        if (/^(?:ALLERG(?:Y|IES)|VITALS?|LABS?|DIAGNOS(?:IS|ES)|IMPRESSION|NOTES?|HISTORY)\s*[:\-]?$/i.test(trimmed)) {
+          inMedSection = false;
+        }
+
+        // Clean leading noise, bullet points, numbers, OCR pipes
+        let clean = trimmed
+          .replace(/^[\|\*\•\–\—\>~#\+]\s*/, '')
+          .replace(/^\d+[\.\)\-]\s*/, '')
+          .replace(/^(?:Rx|Medication|Drug|Take|Prescription)\s*[:\.\-]?\s*/i, '')
+          .trim();
+
+        if (!clean) continue;
+
+        // Match Medication Name, Dosage, Form, and Frequency
+        // e.g. "Metformin HCl 1000mg Tablet PO Twice daily with meals"
         // e.g. "Lisinopril 20 mg PO Daily in the morning"
-        const rxMatch = trimmed.match(/(?:Rx[:\s]*)?([A-Za-z\s\-\/]+?)\s+(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?|iu|puffs?))\b\s*(?:(tab(?:let)?|cap(?:sule)?|inhaler|inj(?:ection)?|liquid|spray|sol(?:ution)?))?\s*(?:PO|oral)?\s*(.*)/i);
+        // e.g. "Amlodipine 5mg tab daily"
+        const rxMatch = clean.match(/^([A-Za-z0-9\s\-\/\(\)]+?)\s+(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?|iu|puffs?|drops?|meq))\b(?:\s+(tab(?:let)?s?|cap(?:sule)?s?|inhaler|inj(?:ection)?|liquid|spray|drops?|cream|patch|sol(?:ution)?))?\s*(?:PO|oral)?\s*(.*)/i);
+
+        let detected = null;
 
         if (rxMatch) {
           const rawName = rxMatch[1].replace(/^(?:Rx|Medication|Drug|Take)\s*[:\-]?\s*/i, '').trim();
@@ -77,16 +105,17 @@
           const formRaw = rxMatch[3] ? rxMatch[3].toLowerCase() : 'tablet';
           const rest = rxMatch[4] ? rxMatch[4].trim() : '';
 
-          // Validate that rawName contains letters and isn't a header
-          if (rawName.length >= 3 && !rawName.match(/^(?:BP|Vitals|Allergies|Lab|Impression|Date|Patient)/i)) {
+          if (rawName.length >= 3 && !rawName.match(/^(?:BP|Vitals|Allergies|Lab|Impression|Date|Patient|Doctor|Signed|Refills?|Dispense)/i)) {
             let form = 'Tablet';
             if (formRaw.includes('cap')) form = 'Capsule';
             else if (formRaw.includes('inhal')) form = 'Inhaler';
             else if (formRaw.includes('inj')) form = 'Injection';
-            else if (formRaw.includes('liquid') || formRaw.includes('sol')) form = 'Liquid';
+            else if (formRaw.includes('liquid') || formRaw.includes('sol')) form = 'Liquid Solution';
             else if (formRaw.includes('spray')) form = 'Nasal Spray';
+            else if (formRaw.includes('cream')) form = 'Topical Cream';
+            else if (formRaw.includes('patch')) form = 'Transdermal Patch';
+            else if (formRaw.includes('drop')) form = 'Drops';
 
-            // Extract frequency from rest
             let frequency = 'Once daily';
             let timing = 'Morning';
             let special = rest;
@@ -104,19 +133,43 @@
             else if (lowerRest.includes('twice') || lowerRest.includes('bid')) timing = 'Morning, Evening';
             else if (lowerRest.includes('prn') || lowerRest.includes('as needed')) timing = 'As needed (PRN)';
 
-            // Clean up drug name title case
-            const cleanName = rawName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            const cleanName = rawName.split(' ')
+              .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+              .join(' ');
 
-            medications.push({
+            detected = {
               drug_name: cleanName,
               dosage: dosage.toUpperCase(),
               form: form,
               frequency: frequency,
               time_of_day: timing,
-              purpose: 'Transcribed from scanned prescription',
+              purpose: 'Transcribed from medical document',
               special_instructions: special || 'Take as directed on prescription label'
-            });
+            };
           }
+        } else if (inMedSection) {
+          // Inside a MEDICATIONS: section, check for known drugs or line with dosage
+          const knownMatch = this.knownDrugs.find(kd => new RegExp('\\b' + kd + '\\b', 'i').test(clean));
+          const numMatch = clean.match(/(\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?|iu|puffs?)?)/i);
+          if (knownMatch && numMatch) {
+            const cleanName = knownMatch.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            let dosage = numMatch[1].trim();
+            if (!/[a-z]/i.test(dosage)) dosage += ' mg';
+            detected = {
+              drug_name: cleanName,
+              dosage: dosage.toUpperCase(),
+              form: 'Tablet',
+              frequency: 'Once daily',
+              time_of_day: 'Morning',
+              purpose: 'Transcribed from medical document',
+              special_instructions: clean
+            };
+          }
+        }
+
+        if (detected && !seenNames.has(detected.drug_name.toLowerCase())) {
+          seenNames.add(detected.drug_name.toLowerCase());
+          medications.push(detected);
         }
       }
 
@@ -125,55 +178,83 @@
 
     extractAllergies(text) {
       const allergies = [];
-      const lines = text.split('\n');
+      const lines = text.replace(/\r\n/g, '\n').split('\n');
+      const seenAllergens = new Set();
+      let inAllergySection = false;
 
-      for (let line of lines) {
-        const trimmed = line.trim();
-        // Check for allergy lines: "Allergies: Penicillin (anaphylaxis), Sulfa"
-        const algMatch = trimmed.match(/(?:Allerg(?:y|ies)|Allergic to)\s*[:\-]\s*(.*)/i);
+      for (let rawLine of lines) {
+        let trimmed = rawLine.trim();
+        if (!trimmed) continue;
+
+        // Check for allergy headers
+        if (/^(?:ALLERG(?:Y|IES)|ALLERGIC TO|KNOWN ALLERGIES)\s*[:\-]?$/i.test(trimmed)) {
+          inAllergySection = true;
+          continue;
+        }
+        if (/^(?:MEDICATIONS?|VITALS?|LABS?|DIAGNOS(?:IS|ES)|IMPRESSION|NOTES?|HISTORY)\s*[:\-]?$/i.test(trimmed)) {
+          inAllergySection = false;
+        }
+
+        let allergyLineItems = null;
+
+        // Pattern 1: Inline header "Allergies: Penicillin (anaphylaxis), Sulfa"
+        const algMatch = trimmed.match(/(?:Allerg(?:y|ies)|Allergic to|Known Allergies)\s*[:\-]\s*(.*)/i);
         if (algMatch) {
-          const items = algMatch[1].split(/[,;]/);
+          allergyLineItems = algMatch[1];
+        } else if (inAllergySection) {
+          // Clean bullet
+          allergyLineItems = trimmed.replace(/^[\|\*\•\–\—\>~#\+]\s*/, '').replace(/^\d+[\.\)\-]\s*/, '');
+        }
+
+        if (allergyLineItems) {
+          const items = allergyLineItems.split(/[,;]/);
           for (let item of items) {
             const raw = item.trim();
-            if (!raw || raw.toLowerCase().includes('none') || raw.toLowerCase().includes('nkda')) continue;
+            if (!raw || /^(?:none|nkda|nka|no known|nil|na)\b/i.test(raw)) continue;
 
             let severity = 'Moderate';
             let reaction = 'Adverse reaction';
             let category = 'Drug';
 
-            // Check reaction in parentheses e.g. "Penicillin (severe anaphylaxis)"
-            const reactionMatch = raw.match(/([^\(\)]+)(?:\((.*)\))?/);
+            // Check reaction in parentheses or colon e.g. "Penicillin (severe anaphylaxis)" or "Sulfa: hives"
+            const reactionMatch = raw.match(/([^\(\:\-]+)(?:[\(\:\-](.*?)[\)]?)?$/);
             let allergen = raw;
             if (reactionMatch) {
               allergen = reactionMatch[1].trim();
-              if (reactionMatch[2]) reaction = reactionMatch[2].trim();
+              if (reactionMatch[2]) reaction = reactionMatch[2].replace(/[\(\)]/g, '').trim();
             }
+
+            if (!allergen || allergen.length < 2) continue;
 
             const lower = (allergen + ' ' + reaction).toLowerCase();
             if (lower.includes('anaphylaxis') || lower.includes('closure') || lower.includes('shock') || lower.includes('life')) {
               severity = 'Life-Threatening';
             } else if (lower.includes('severe') || lower.includes('angioedema') || lower.includes('wheezing') || lower.includes('bleeding')) {
               severity = 'Severe';
-            } else if (lower.includes('mild') || lower.includes('nausea') || lower.includes('sneezing')) {
+            } else if (lower.includes('mild') || lower.includes('nausea') || lower.includes('sneezing') || lower.includes('itching')) {
               severity = 'Mild';
             }
 
-            if (lower.includes('peanut') || lower.includes('nut') || lower.includes('shellfish') || lower.includes('egg') || lower.includes('milk') || lower.includes('gluten')) {
+            if (lower.includes('peanut') || lower.includes('nut') || lower.includes('shellfish') || lower.includes('egg') || lower.includes('milk') || lower.includes('gluten') || lower.includes('soy')) {
               category = 'Food';
-            } else if (lower.includes('latex') || lower.includes('rubber') || lower.includes('nickel')) {
+            } else if (lower.includes('latex') || lower.includes('rubber') || lower.includes('nickel') || lower.includes('adhesive')) {
               category = 'Material';
-            } else if (lower.includes('pollen') || lower.includes('dander') || lower.includes('dust') || lower.includes('grass')) {
+            } else if (lower.includes('pollen') || lower.includes('dander') || lower.includes('dust') || lower.includes('grass') || lower.includes('mold')) {
               category = 'Environmental';
             }
 
-            allergies.push({
-              allergen: allergen.charAt(0).toUpperCase() + allergen.slice(1),
-              reaction: reaction,
-              severity: severity,
-              category: category,
-              verification_status: 'Confirmed',
-              notes: 'Extracted from clinical record'
-            });
+            const cleanAllergen = allergen.charAt(0).toUpperCase() + allergen.slice(1);
+            if (!seenAllergens.has(cleanAllergen.toLowerCase())) {
+              seenAllergens.add(cleanAllergen.toLowerCase());
+              allergies.push({
+                allergen: cleanAllergen,
+                reaction: reaction || 'Adverse reaction',
+                severity: severity,
+                category: category,
+                verification_status: 'Confirmed',
+                notes: 'Extracted from clinical record'
+              });
+            }
           }
         }
       }
@@ -189,19 +270,26 @@
       let temp = null;
       let glucose = null;
 
-      // Extract Blood Pressure e.g. "BP: 124/80" or "BP 130/85 mmHg"
-      const bpMatch = text.match(/(?:BP|Blood Pressure)\s*[:\-]?\s*(\d{2,3}\s*\/\s*\d{2,3})/i);
-      if (bpMatch) bp = bpMatch[1].replace(/\s+/g, '') + ' mmHg';
+      // Extract Blood Pressure e.g. "BP: 124/80" or "BP 130/85 mmHg" or "120/80 mmHg"
+      const bpMatch = text.match(/(?:BP|Blood Pressure)\s*[:\-]?\s*(\d{2,3}\s*\/\s*\d{2,3})/i) ||
+                      text.match(/\b(1\d\d|2\d\d|[89]\d)\s*\/\s*([4-9]\d|1[01]\d)\s*(?:mmHg)?\b/i);
+      if (bpMatch) {
+        if (bpMatch[2]) {
+          bp = `${bpMatch[1]}/${bpMatch[2]} mmHg`;
+        } else {
+          bp = bpMatch[1].replace(/\s+/g, '') + ' mmHg';
+        }
+      }
 
-      // Extract Heart Rate e.g. "HR: 72 bpm" or "Pulse: 74"
+      // Extract Heart Rate e.g. "HR: 72 bpm" or "Pulse: 74" or "HR 70"
       const hrMatch = text.match(/(?:HR|Pulse|Heart Rate)\s*[:\-]?\s*(\d{2,3})\s*(?:bpm)?/i);
       if (hrMatch) hr = parseInt(hrMatch[1]);
 
-      // Extract SpO2 e.g. "SpO2: 98%" or "O2 Sat: 99%"
-      const spo2Match = text.match(/(?:SpO2|O2 Sat(?:uration)?|Pulse Ox)\s*[:\-]?\s*(\d{2,3})\s*%/i);
+      // Extract SpO2 e.g. "SpO2: 98%" or "O2 Sat: 99%" or "Pulse Ox: 97%"
+      const spo2Match = text.match(/(?:SpO2|O2 Sat(?:uration)?|Pulse Ox|O2)\s*[:\-]?\s*(\d{2,3})\s*%/i);
       if (spo2Match) spo2 = parseInt(spo2Match[1]);
 
-      // Extract Temp e.g. "Temp: 36.8 C" or "T: 98.6 F"
+      // Extract Temp e.g. "Temp: 36.8 C" or "T: 98.6 F" or "36.8°C"
       const tempMatch = text.match(/(?:Temp(?:erature)?|T)\s*[:\-]?\s*(\d{2,3}(?:\.\d+)?)\s*(?:°?\s*([CF]))?/i);
       if (tempMatch) {
         let val = parseFloat(tempMatch[1]);
@@ -211,8 +299,8 @@
         temp = parseFloat(val);
       }
 
-      // Extract Blood Glucose e.g. "Glucose: 112 mg/dL" or "FSBG: 104"
-      const glucoseMatch = text.match(/(?:Glucose|Blood Sugar|FSBG|BS)\s*[:\-]?\s*(\d{2,3})\s*(?:mg\/dL)?/i);
+      // Extract Blood Glucose e.g. "Glucose: 112 mg/dL" or "FSBG: 104" or "Blood Sugar: 115"
+      const glucoseMatch = text.match(/(?:Glucose|Blood Sugar|FSBG|BS|Sugar)\s*[:\-]?\s*(\d{2,3})\s*(?:mg\/dL)?/i);
       if (glucoseMatch) glucose = parseInt(glucoseMatch[1]);
 
       if (bp || hr || spo2 || temp || glucose) {
@@ -232,16 +320,35 @@
 
     extractConditions(text) {
       const conditions = [];
-      const lines = text.split('\n');
+      const lines = text.replace(/\r\n/g, '\n').split('\n');
+      const seenConditions = new Set();
+      let inCondSection = false;
 
-      for (let line of lines) {
-        const trimmed = line.trim();
-        const condMatch = trimmed.match(/(?:Diagnosis|Diagnoses|Impression|History of|Condition)\s*[:\-]\s*(.*)/i);
+      for (let rawLine of lines) {
+        let trimmed = rawLine.trim();
+        if (!trimmed) continue;
+
+        if (/^(?:DIAGNOS(?:IS|ES)|IMPRESSION|HISTORY OF|CONDITIONS?|ACTIVE PROBLEMS?)\s*[:\-]?$/i.test(trimmed)) {
+          inCondSection = true;
+          continue;
+        }
+        if (/^(?:MEDICATIONS?|ALLERG(?:Y|IES)|VITALS?|LABS?|NOTES?|RX)\s*[:\-]?$/i.test(trimmed)) {
+          inCondSection = false;
+        }
+
+        let condLineItems = null;
+        const condMatch = trimmed.match(/(?:Diagnosis|Diagnoses|Impression|History of|Condition|Problem)\s*[:\-]\s*(.*)/i);
         if (condMatch) {
-          const items = condMatch[1].split(/[,;]/);
+          condLineItems = condMatch[1];
+        } else if (inCondSection) {
+          condLineItems = trimmed.replace(/^[\|\*\•\–\—\>~#\+]\s*/, '').replace(/^\d+[\.\)\-]\s*/, '');
+        }
+
+        if (condLineItems) {
+          const items = condLineItems.split(/[,;]/);
           for (let item of items) {
             const raw = item.trim();
-            if (!raw || raw.length < 3) continue;
+            if (!raw || raw.length < 3 || /^(?:none|no acute|normal)\b/i.test(raw)) continue;
 
             // Extract optional ICD code: "Type 2 Diabetes Mellitus (E11.9)"
             const icdMatch = raw.match(/(.*?)\s*\(([A-Z]\d{2}(?:\.\d+)?)\)/i);
@@ -266,12 +373,16 @@
               category = 'Neurology';
             }
 
-            conditions.push({
-              condition_name: name.charAt(0).toUpperCase() + name.slice(1),
-              icd10_code: icd || 'R69',
-              category: category,
-              status: 'Active'
-            });
+            const cleanName = name.charAt(0).toUpperCase() + name.slice(1);
+            if (!seenConditions.has(cleanName.toLowerCase())) {
+              seenConditions.add(cleanName.toLowerCase());
+              conditions.push({
+                condition_name: cleanName,
+                icd10_code: icd || 'R69',
+                category: category,
+                status: 'Active'
+              });
+            }
           }
         }
       }

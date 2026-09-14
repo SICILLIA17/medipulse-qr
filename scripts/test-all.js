@@ -167,6 +167,39 @@ async function runTests() {
     const chartsJsRes = await request({ path: '/js/charts.js', method: 'GET' });
     assert(chartsJsRes.statusCode === 200 && chartsJsRes.body.includes('ClinicalCharts'), 'GET /js/charts.js delivers chart visualizer');
 
+    // 13. Enhanced OCR & Bulleted NLP Parsing Test
+    const noisyOcrText = `
+    PRESCRIPTION DISCHARGE SUMMARY
+    MEDICATIONS:
+    - Amlodipine 10 mg tablet Once daily in morning
+    * Losartan Potassium 50mg tab Twice daily
+    • Atorvastatin 20mg tab at bedtime
+    1. Metformin 500mg with meals
+
+    ALLERGIES:
+    - Codeine (severe nausea)
+    * Penicillin: anaphylaxis
+
+    VITALS:
+    BP: 130/85 mmHg
+    Pulse: 74 bpm
+    SpO2: 98%
+    Temp: 37.0 C
+    Blood Sugar: 118 mg/dL
+    `;
+    const noisyParsed = parser.parseText(noisyOcrText);
+    assert(noisyParsed.medications.length >= 4, 'Enhanced parser accurately extracts bulleted and numbered medications');
+    assert(noisyParsed.allergies.length >= 2, 'Enhanced parser extracts multiline section-based allergies');
+    assert(noisyParsed.vitals.length >= 1 && noisyParsed.vitals[0].blood_pressure.includes('130/85'), 'Enhanced parser extracts vitals from section blocks');
+
+    // 14. Transcribe AI Fallback Route
+    const aiTestRes = await request({ path: '/api/transcribe-ai', method: 'POST', headers: { 'Content-Type': 'application/json' } }, { test: true });
+    assert(aiTestRes.statusCode === 200 && aiTestRes.body.fallbackToClient === true, 'POST /api/transcribe-ai returns clean fallback in local dev');
+
+    // 15. Verify scanVerificationModal in index.html
+    const indexRes = await request({ path: '/index.html', method: 'GET' });
+    assert(indexRes.statusCode === 200 && indexRes.body.includes('scanVerificationModal') && indexRes.body.includes('verifySummaryView'), 'Index delivers scan verification popup with Yes/No confirmation & manual form');
+
     console.log('----------------------------------------------------');
     console.log(`EXPANDED TEST RUN FINISHED: ${passed} PASSED, ${failed} FAILED`);
   } finally {

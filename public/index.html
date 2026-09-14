@@ -821,6 +821,175 @@
   </div>
 
   <!-- ========================================================================= -->
+  <!-- MODAL: SCAN VERIFICATION & PATIENT VALUE CONFIRMATION (YES / NO / MANUAL) -->
+  <!-- ========================================================================= -->
+  <div id="scanVerificationModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
+      
+      <!-- Header -->
+      <div class="flex items-center justify-between p-4 sm:p-5 border-b border-slate-100 bg-gradient-to-r from-teal-50/80 to-cyan-50/80">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-2xl bg-teal-600 text-white flex items-center justify-center shadow-sm">
+            <i data-lucide="clipboard-check" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-extrabold text-slate-900">Verify Scanned Medical Record</h3>
+              <span id="scanVerifyBadge" class="text-[10px] font-black uppercase px-2 py-0.5 rounded bg-teal-100 text-teal-800">Verification Required</span>
+            </div>
+            <p class="text-xs text-slate-500">Confirm whether the extracted medications, allergies, and vitals match your document.</p>
+          </div>
+        </div>
+        <button onclick="app.closeScanVerificationModal()" class="text-slate-400 hover:text-slate-600 p-2 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- VIEW 1: SUMMARY & CONFIRMATION QUESTION ("YES" or "NO") -->
+      <div id="verifySummaryView" class="flex-1 p-4 sm:p-6 overflow-y-auto space-y-4">
+        
+        <!-- Scanned Text Preview (Collapsible) -->
+        <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-200 text-xs">
+          <div class="flex items-center justify-between cursor-pointer" onclick="app.toggleRawScanTextPreview()">
+            <span class="font-bold text-slate-700 flex items-center gap-1.5">
+              <i data-lucide="file-text" class="w-3.5 h-3.5 text-slate-500"></i> Transcribed Document Text
+            </span>
+            <span id="toggleScanTextBtn" class="text-teal-700 hover:underline text-[11px] font-semibold flex items-center gap-1">
+              <span>View Text</span> <i data-lucide="chevron-down" class="w-3 h-3"></i>
+            </span>
+          </div>
+          <pre id="verifyRawText" class="hidden mt-2 p-2.5 bg-slate-900 text-slate-100 rounded-xl font-mono text-[11px] whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-800"></pre>
+        </div>
+
+        <!-- Detected Values Cards Container -->
+        <div class="space-y-3">
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Values Detected from Scan:</span>
+          
+          <div id="verifyEntitiesSummary" class="space-y-3">
+            <!-- Dynamically populated cards for Medications, Allergies, Vitals, Diagnoses -->
+          </div>
+        </div>
+
+        <!-- The Confirmation Question Box (Prominent & Clear) -->
+        <div class="bg-teal-50/80 border-2 border-teal-500/40 rounded-2xl p-4 sm:p-5 text-center space-y-3 shadow-sm">
+          <div class="flex items-center justify-center gap-2 text-teal-900">
+            <i data-lucide="help-circle" class="w-5 h-5 text-teal-600"></i>
+            <h4 class="text-base font-black">Are these detected values accurate?</h4>
+          </div>
+          <p class="text-xs text-slate-600 max-w-md mx-auto">
+            Please check that the drug names, dosages, and vitals match your physical document or prescription.
+          </p>
+          
+          <!-- Confirmation Buttons: YES / NO -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <button type="button" onclick="app.confirmScannedValuesYes()" class="w-full py-3 px-4 rounded-xl text-sm font-black text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition flex items-center justify-center gap-2">
+              <i data-lucide="check-circle" class="w-5 h-5"></i>
+              <span>Yes, Values Are Correct</span>
+            </button>
+            <button type="button" onclick="app.openManualEntryForm()" class="w-full py-3 px-4 rounded-xl text-sm font-black text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 shadow-sm transition flex items-center justify-center gap-2">
+              <i data-lucide="edit-3" class="w-5 h-5 text-amber-700"></i>
+              <span>No, Enter / Edit Manually</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- VIEW 2: MANUAL ENTRY / EDITING FORM (Appears if patient says "NO") -->
+      <div id="verifyManualView" class="hidden flex-1 p-4 sm:p-6 overflow-y-auto space-y-5">
+        <div class="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 text-xs text-amber-900 flex items-start gap-2.5">
+          <i data-lucide="alert-circle" class="w-4 h-4 text-amber-600 shrink-0 mt-0.5"></i>
+          <div>
+            <strong class="font-bold block">Manual Entry & Correction Mode</strong>
+            <span>Review and adjust any inaccurate values below. You can edit dosages, add missing medications, or clear invalid entries.</span>
+          </div>
+        </div>
+
+        <!-- Section A: Medications Form -->
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-teal-900 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="pill" class="w-3.5 h-3.5 text-teal-600"></i> Medications to Add
+            </span>
+            <button type="button" onclick="app.addManualMedRow()" class="text-xs font-bold text-teal-700 hover:text-teal-900 flex items-center gap-1 bg-teal-50 hover:bg-teal-100 px-2 py-1 rounded-lg border border-teal-200">
+              <i data-lucide="plus" class="w-3 h-3"></i> Add Medication
+            </button>
+          </div>
+          <div id="manualMedsContainer" class="space-y-2">
+            <!-- Dynamic med rows -->
+          </div>
+        </div>
+
+        <!-- Section B: Allergies Form -->
+        <div class="space-y-2 pt-2 border-t border-slate-100">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-rose-900 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-rose-600"></i> Allergies to Record
+            </span>
+            <button type="button" onclick="app.addManualAllergyRow()" class="text-xs font-bold text-rose-700 hover:text-rose-900 flex items-center gap-1 bg-rose-50 hover:bg-rose-100 px-2 py-1 rounded-lg border border-rose-200">
+              <i data-lucide="plus" class="w-3 h-3"></i> Add Allergy
+            </button>
+          </div>
+          <div id="manualAllergiesContainer" class="space-y-2">
+            <!-- Dynamic allergy rows -->
+          </div>
+        </div>
+
+        <!-- Section C: Vitals Form -->
+        <div class="space-y-2 pt-2 border-t border-slate-100">
+          <span class="text-xs font-bold text-indigo-900 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="activity" class="w-3.5 h-3.5 text-indigo-600"></i> Vitals (Optional)
+          </span>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Blood Pressure</label>
+              <input type="text" id="manualVitBp" placeholder="120/80 mmHg" class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Heart Rate</label>
+              <input type="number" id="manualVitHr" placeholder="72 bpm" class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">SpO2 Oxygen %</label>
+              <input type="number" id="manualVitSpo2" placeholder="98%" class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Temp (°C)</label>
+              <input type="number" step="0.1" id="manualVitTemp" placeholder="36.8" class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+            <div class="col-span-2 sm:col-span-1">
+              <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Blood Glucose</label>
+              <input type="number" id="manualVitGlucose" placeholder="110 mg/dL" class="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono">
+            </div>
+          </div>
+        </div>
+
+        <!-- Section D: Diagnoses / Condition -->
+        <div class="space-y-2 pt-2 border-t border-slate-100">
+          <span class="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+            <i data-lucide="clipboard-list" class="w-3.5 h-3.5 text-slate-600"></i> Diagnosis / Medical Conditions
+          </span>
+          <input type="text" id="manualConditionsInput" placeholder="e.g. Type 2 Diabetes, Hypertension (comma separated)" class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg">
+        </div>
+
+      </div>
+
+      <!-- Footer for Manual View -->
+      <div id="verifyManualFooter" class="hidden flex items-center justify-between p-4 sm:p-5 border-t border-slate-100 bg-slate-50/70">
+        <button type="button" onclick="app.backToVerifySummary()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5">
+          <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+          <span>Back to Summary</span>
+        </button>
+        <button type="button" onclick="app.saveManualRecordsToEhr()" class="px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 rounded-xl shadow-md transition flex items-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>
+          <span>Save Values to Medical Record</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
   <!-- MODAL: MEDICATION DOSAGE CHANGE / TITRATION (NEW!) -->
   <!-- ========================================================================= -->
   <div id="titrationModal" class="no-print hidden fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">

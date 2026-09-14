@@ -316,7 +316,26 @@ export async function onRequest(context) {
         }
         const imageArray = [...bytes];
 
-        const prompt = body.prompt || 'Transcribe all handwritten and printed text from this medical prescription, lab report, or clinical note accurately. List all medications, dosages, directions/frequencies, allergies, vitals, and diagnoses exactly as written.';
+        const prompt = body.prompt || `You are an expert clinical OCR and medical transcription specialist.
+Transcribe all text from this medical prescription, lab report, discharge summary, or doctor note with absolute medical accuracy.
+Extract and clearly label each section using these exact headers:
+
+MEDICATIONS:
+- [Drug Name] [Dosage] [Form] [Frequency/Instructions]
+
+ALLERGIES:
+- [Allergen] ([Reaction, Severity])
+
+VITALS:
+- BP: [Blood Pressure] mmHg, HR: [Heart Rate] bpm, SpO2: [%], Temp: [°C/°F], Glucose: [mg/dL]
+
+DIAGNOSES:
+- [Condition Name]
+
+LABS:
+- [Test Name]: [Result Value]
+
+Output ONLY the clear clinical transcription. Do not include any greeting, conversational preamble, explanatory notes, or code blocks.`;
 
         const response = await AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
           image: imageArray,

@@ -958,14 +958,63 @@ class MediPulseApp {
     event.target.value = '';
   }
 
+  // -------------------------------------------------------------
+  // IMAGE PREPROCESSING FOR OCR & AI VISION
+  // -------------------------------------------------------------
+  async preprocessImageForOcr(dataUrl) {
+    if (!dataUrl || !dataUrl.startsWith('data:image')) return dataUrl;
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = 1600;
+          let width = img.width;
+          let height = img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Contrast enhancement
+          const imgData = ctx.getImageData(0, 0, width, height);
+          const d = imgData.data;
+          const factor = (259 * (1.18 + 255)) / (255 * (259 - 1.18));
+          for (let i = 0; i < d.length; i += 4) {
+            d[i] = factor * (d[i] - 128) + 128;
+            d[i+1] = factor * (d[i+1] - 128) + 128;
+            d[i+2] = factor * (d[i+2] - 128) + 128;
+          }
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.90));
+        } catch (e) {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
   async processDocumentImage(imgData) {
-    this.currentDocImageData = imgData;
+    // 1. Preprocess image (scaling down to max 1600px + contrast normalization)
+    const processedImg = await this.preprocessImageForOcr(imgData);
+    this.currentDocImageData = processedImg;
 
     const preview = document.getElementById('docPreviewContainer');
     if (preview) {
       preview.innerHTML = `
         <div class="relative w-full h-[240px] flex items-center justify-center">
-          <img src="${imgData}" class="max-h-[220px] rounded-xl object-contain mx-auto shadow-md" alt="Document Upload">
+          <img src="${processedImg}" class="max-h-[220px] rounded-xl object-contain mx-auto shadow-md" alt="Document Upload">
           <div class="absolute top-2 right-2 flex gap-1.5">
             <button type="button" onclick="app.startDocumentCamera()" class="px-2 py-1 bg-black/70 hover:bg-black/90 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow">
               <i data-lucide="camera" class="w-3.5 h-3.5 text-emerald-400"></i> Retake
@@ -989,35 +1038,33 @@ class MediPulseApp {
       if (window.lucide) lucide.createIcons();
     }
 
+    let extractedText = '';
+
     // 1. Try Cloudflare Workers AI Edge Multimodal Vision Model first
     try {
       const aiRes = await fetch('/api/transcribe-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imgData })
+        body: JSON.stringify({ image: processedImg })
       });
 
       if (aiRes.ok) {
         const aiData = await aiRes.json();
         if (aiData.success && aiData.text && aiData.text.trim().length > 5) {
-          if (progressContainer) progressContainer.classList.add('hidden');
-          document.getElementById('rawTranscriptionText').value = aiData.text.trim();
-          this.reparseTranscriptionText();
-          this.showToast('Transcribed with Cloudflare Workers AI at the edge!', 'success');
-          return;
+          extractedText = aiData.text.trim();
         }
       }
     } catch (aiErr) {
       console.warn('Workers AI call failed, falling back to local OCR:', aiErr);
     }
 
-    // 2. Graceful Fallback: Client-side OCR via Tesseract.js
-    if (statusText) {
-      statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Running in-browser OCR engine...`;
-      if (window.lucide) lucide.createIcons();
-    }
+    // 2. Graceful Fallback: Client-side OCR via Tesseract.js if Workers AI didn't return text
+    if (!extractedText && window.Tesseract) {
+      if (statusText) {
+        statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Running in-browser OCR engine...`;
+        if (window.lucide) lucide.createIcons();
+      }
 
-    if (window.Tesseract) {
       try {
         const worker = await Tesseract.createWorker('eng', 1, {
           logger: m => {
@@ -1030,20 +1077,11 @@ class MediPulseApp {
           }
         });
 
-        const result = await worker.recognize(imgData);
+        const result = await worker.recognize(processedImg);
         await worker.terminate();
 
-        const extractedText = (result && result.data && result.data.text) ? result.data.text.trim() : '';
-
-        if (progressContainer) {
-          progressContainer.classList.add('hidden');
-        }
-
-        if (extractedText.length > 5) {
-          document.getElementById('rawTranscriptionText').value = extractedText;
-          this.reparseTranscriptionText();
-          this.showToast('Document transcribed successfully!', 'success');
-          return;
+        if (result && result.data && result.data.text && result.data.text.trim().length > 5) {
+          extractedText = result.data.text.trim();
         }
       } catch (ocrErr) {
         console.warn('Tesseract OCR error:', ocrErr);
@@ -1054,7 +1092,18 @@ class MediPulseApp {
       progressContainer.classList.add('hidden');
     }
 
-    this.showToast('Image captured! You can review or edit the text box directly.', 'success');
+    if (extractedText) {
+      document.getElementById('rawTranscriptionText').value = extractedText;
+      const parsed = this.reparseTranscriptionText();
+      // Show Verification Pop-up immediately to confirm or manually edit
+      this.showScanVerificationModal(parsed, extractedText, processedImg);
+      this.showToast('Document transcribed! Please review detected values in the pop-up.', 'success');
+    } else {
+      const rawVal = document.getElementById('rawTranscriptionText')?.value || '';
+      const parsed = this.reparseTranscriptionText();
+      this.showScanVerificationModal(parsed, rawVal, processedImg);
+      this.showToast('Scan captured. Please confirm or enter values manually.', 'info');
+    }
   }
 
   loadSampleDocument(docId) {
@@ -1080,8 +1129,9 @@ class MediPulseApp {
       `;
     }
 
-    this.reparseTranscriptionText();
-    this.showToast(`Loaded sample document: ${sample.title}`, 'success');
+    const parsed = this.reparseTranscriptionText();
+    this.showScanVerificationModal(parsed, sample.rawText, '');
+    this.showToast(`Loaded sample: ${sample.title} - Please review detected values`, 'success');
   }
 
   reparseTranscriptionText() {
@@ -1089,6 +1139,7 @@ class MediPulseApp {
     const parsed = this.clinicalParser.parseText(text);
     this.extractedEntitiesDraft = parsed;
     this.renderExtractedEntities(parsed);
+    return parsed;
   }
 
   renderExtractedEntities(parsed) {
@@ -1300,6 +1351,473 @@ class MediPulseApp {
       this.switchTab('medications');
     } catch (e) {
       this.showToast(e.message, 'error');
+    }
+  }
+
+  // -------------------------------------------------------------
+  // SCAN VERIFICATION MODAL & MANUAL ENTRY FLOW
+  // -------------------------------------------------------------
+  openVerificationFromTranscription() {
+    const rawText = document.getElementById('rawTranscriptionText')?.value || '';
+    const parsed = this.clinicalParser.parseText(rawText);
+    this.showScanVerificationModal(parsed, rawText, this.currentDocImageData);
+  }
+
+  showScanVerificationModal(parsed, rawText = '', imgData = '') {
+    this.pendingVerification = {
+      parsed: parsed || { medications: [], allergies: [], vitals: [], conditions: [], labs: [] },
+      rawText: rawText || (document.getElementById('rawTranscriptionText')?.value || ''),
+      imgData: imgData || this.currentDocImageData || ''
+    };
+
+    const modal = document.getElementById('scanVerificationModal');
+    const summaryView = document.getElementById('verifySummaryView');
+    const manualView = document.getElementById('verifyManualView');
+    const manualFooter = document.getElementById('verifyManualFooter');
+    const rawTextEl = document.getElementById('verifyRawText');
+    const container = document.getElementById('verifyEntitiesSummary');
+
+    if (!modal) return;
+
+    // Reset view state
+    if (summaryView) summaryView.classList.remove('hidden');
+    if (manualView) manualView.classList.add('hidden');
+    if (manualFooter) manualFooter.classList.add('hidden');
+
+    if (rawTextEl) {
+      rawTextEl.textContent = this.pendingVerification.rawText || 'No raw transcribed text available.';
+      rawTextEl.classList.add('hidden');
+      const toggleBtn = document.getElementById('toggleScanTextBtn');
+      if (toggleBtn) toggleBtn.innerHTML = `<span>View Text</span> <i data-lucide="chevron-down" class="w-3 h-3"></i>`;
+    }
+
+    // Build Detected Entities Summary Cards
+    let html = '';
+    const p = this.pendingVerification.parsed;
+    const totalCount = (p.medications?.length || 0) + (p.allergies?.length || 0) + (p.vitals?.length || 0) + (p.conditions?.length || 0);
+
+    if (totalCount === 0) {
+      html = `
+        <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-center text-xs text-amber-800 space-y-1">
+          <i data-lucide="help-circle" class="w-6 h-6 mx-auto text-amber-600 mb-1"></i>
+          <p class="font-bold text-sm">No structured medical entries could be automatically recognized.</p>
+          <p class="text-slate-600">The scan may be blurry or formatted uniquely. Click <strong>"No, Enter / Edit Manually"</strong> below to type your medications or vitals directly.</p>
+        </div>
+      `;
+    } else {
+      // Medications card
+      if (p.medications && p.medications.length > 0) {
+        html += `
+          <div class="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-sm space-y-2">
+            <span class="text-xs font-bold text-teal-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="pill" class="w-4 h-4 text-teal-600"></i> Detected Medications (${p.medications.length})
+            </span>
+            <div class="divide-y divide-slate-100">
+              ${p.medications.map(m => `
+                <div class="py-2 first:pt-0 last:pb-0 text-xs flex items-center justify-between">
+                  <div>
+                    <strong class="text-slate-900 font-extrabold text-sm">${m.drug_name}</strong>
+                    <span class="ml-1.5 px-2 py-0.5 rounded bg-teal-50 text-teal-800 font-mono font-bold">${m.dosage}</span>
+                    <p class="text-slate-500 text-[11px] mt-0.5">${m.frequency || 'Once daily'} • ${m.special_instructions || 'Take as directed'}</p>
+                  </div>
+                  <span class="px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-700">${m.form || 'Tablet'}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      // Allergies card
+      if (p.allergies && p.allergies.length > 0) {
+        html += `
+          <div class="bg-white rounded-2xl p-3.5 border border-rose-200 shadow-sm space-y-2">
+            <span class="text-xs font-bold text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="shield-alert" class="w-4 h-4 text-rose-600"></i> Detected Allergies (${p.allergies.length})
+            </span>
+            <div class="divide-y divide-slate-100">
+              ${p.allergies.map(a => `
+                <div class="py-2 first:pt-0 last:pb-0 text-xs flex items-center justify-between">
+                  <div>
+                    <strong class="text-slate-900 font-extrabold">${a.allergen}</strong>
+                    <p class="text-slate-500 text-[11px] mt-0.5">${a.reaction || 'Adverse reaction'}</p>
+                  </div>
+                  <span class="px-2 py-0.5 text-[10px] font-black uppercase rounded ${a.severity === 'Life-Threatening' ? 'bg-rose-600 text-white' : 'bg-amber-100 text-amber-800'}">${a.severity}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      // Vitals card
+      if (p.vitals && p.vitals.length > 0) {
+        const v = p.vitals[0];
+        html += `
+          <div class="bg-white rounded-2xl p-3.5 border border-indigo-200 shadow-sm space-y-2">
+            <span class="text-xs font-bold text-indigo-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="activity" class="w-4 h-4 text-indigo-600"></i> Detected Bedside Vitals
+            </span>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+              ${v.blood_pressure ? `<div class="bg-slate-50 p-2 rounded-xl border border-slate-200"><span class="text-[10px] text-slate-400 block font-sans">BP</span><strong class="text-slate-900 text-sm">${v.blood_pressure}</strong></div>` : ''}
+              ${v.heart_rate ? `<div class="bg-slate-50 p-2 rounded-xl border border-slate-200"><span class="text-[10px] text-slate-400 block font-sans">Heart Rate</span><strong class="text-slate-900 text-sm">${v.heart_rate} bpm</strong></div>` : ''}
+              ${v.spo2 ? `<div class="bg-slate-50 p-2 rounded-xl border border-slate-200"><span class="text-[10px] text-slate-400 block font-sans">SpO2</span><strong class="text-slate-900 text-sm">${v.spo2} %</strong></div>` : ''}
+              ${v.temperature ? `<div class="bg-slate-50 p-2 rounded-xl border border-slate-200"><span class="text-[10px] text-slate-400 block font-sans">Temp</span><strong class="text-slate-900 text-sm">${v.temperature} °C</strong></div>` : ''}
+              ${v.blood_glucose ? `<div class="bg-slate-50 p-2 rounded-xl border border-slate-200"><span class="text-[10px] text-slate-400 block font-sans">Glucose</span><strong class="text-slate-900 text-sm">${v.blood_glucose} mg/dL</strong></div>` : ''}
+            </div>
+          </div>
+        `;
+      }
+
+      // Conditions card
+      if (p.conditions && p.conditions.length > 0) {
+        html += `
+          <div class="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-sm space-y-2">
+            <span class="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="clipboard-list" class="w-4 h-4 text-slate-600"></i> Detected Conditions (${p.conditions.length})
+            </span>
+            <div class="flex flex-wrap gap-1.5">
+              ${p.conditions.map(c => `
+                <span class="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 text-xs font-bold border border-slate-200">
+                  ${c.condition_name} <span class="text-[10px] text-slate-400 font-mono">(${c.icd10_code || 'R69'})</span>
+                </span>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    if (container) container.innerHTML = html;
+
+    modal.classList.remove('hidden');
+    if (window.lucide) lucide.createIcons();
+  }
+
+  closeScanVerificationModal() {
+    const modal = document.getElementById('scanVerificationModal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  toggleRawScanTextPreview() {
+    const el = document.getElementById('verifyRawText');
+    const btn = document.getElementById('toggleScanTextBtn');
+    if (!el) return;
+    const isHidden = el.classList.contains('hidden');
+    if (isHidden) {
+      el.classList.remove('hidden');
+      if (btn) btn.innerHTML = `<span>Hide Text</span> <i data-lucide="chevron-up" class="w-3 h-3"></i>`;
+    } else {
+      el.classList.add('hidden');
+      if (btn) btn.innerHTML = `<span>View Text</span> <i data-lucide="chevron-down" class="w-3 h-3"></i>`;
+    }
+    if (window.lucide) lucide.createIcons();
+  }
+
+  // User clicked "YES, Values Are Correct"
+  async confirmScannedValuesYes() {
+    if (!this.pendingVerification || !this.currentPatient) return;
+    const p = this.pendingVerification.parsed;
+
+    const payload = {
+      medications: p.medications || [],
+      allergies: p.allergies || [],
+      vitals: p.vitals || [],
+      conditions: p.conditions || [],
+      labs: p.labs || [],
+      document_metadata: {
+        document_type: 'Prescription / Clinical Scan (Verified)',
+        file_name: 'verified_scan_' + Date.now() + '.jpg',
+        image_url: this.pendingVerification.imgData || '',
+        raw_transcription: this.pendingVerification.rawText || ''
+      }
+    };
+
+    try {
+      this.showToast('Saving verified values to patient medical record...', 'info');
+      const res = await fetch(`/api/patients/${this.currentPatient.id}/commit-scanned-records`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error('Failed to save records');
+      const data = await res.json();
+
+      this.closeScanVerificationModal();
+      this.closeTranscriptionModal();
+      this.showToast('Confirmed! Extracted records permanently committed to SQLite.', 'success');
+
+      await this.loadPatient(this.currentPatient.id);
+      this.switchTab('medications');
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  }
+
+  // User clicked "NO, Enter / Edit Manually"
+  openManualEntryForm() {
+    const summaryView = document.getElementById('verifySummaryView');
+    const manualView = document.getElementById('verifyManualView');
+    const manualFooter = document.getElementById('verifyManualFooter');
+
+    if (summaryView) summaryView.classList.add('hidden');
+    if (manualView) manualView.classList.remove('hidden');
+    if (manualFooter) manualFooter.classList.remove('hidden');
+
+    const medsContainer = document.getElementById('manualMedsContainer');
+    const algContainer = document.getElementById('manualAllergiesContainer');
+
+    if (medsContainer) medsContainer.innerHTML = '';
+    if (algContainer) algContainer.innerHTML = '';
+
+    const p = this.pendingVerification?.parsed || {};
+
+    // Populate medications
+    if (p.medications && p.medications.length > 0) {
+      p.medications.forEach(m => this.addManualMedRow(m));
+    } else {
+      this.addManualMedRow();
+    }
+
+    // Populate allergies
+    if (p.allergies && p.allergies.length > 0) {
+      p.allergies.forEach(a => this.addManualAllergyRow(a));
+    } else {
+      this.addManualAllergyRow();
+    }
+
+    // Populate vitals
+    const v = (p.vitals && p.vitals[0]) || {};
+    const bpEl = document.getElementById('manualVitBp');
+    const hrEl = document.getElementById('manualVitHr');
+    const spo2El = document.getElementById('manualVitSpo2');
+    const tempEl = document.getElementById('manualVitTemp');
+    const gluEl = document.getElementById('manualVitGlucose');
+
+    if (bpEl) bpEl.value = v.blood_pressure || '';
+    if (hrEl) hrEl.value = v.heart_rate || '';
+    if (spo2El) spo2El.value = v.spo2 || '';
+    if (tempEl) tempEl.value = v.temperature || '';
+    if (gluEl) gluEl.value = v.blood_glucose || '';
+
+    // Populate conditions
+    const condStr = (p.conditions || []).map(c => c.condition_name).join(', ');
+    const condEl = document.getElementById('manualConditionsInput');
+    if (condEl) condEl.value = condStr;
+
+    if (window.lucide) lucide.createIcons();
+  }
+
+  addManualMedRow(med = {}) {
+    const container = document.getElementById('manualMedsContainer');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'manual-med-row bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2';
+    row.innerHTML = `
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div>
+          <label class="block text-[10px] font-bold text-slate-500 uppercase">Drug Name *</label>
+          <input type="text" class="manual-med-name w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-bold" placeholder="e.g. Metformin" value="${med.drug_name || ''}">
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold text-slate-500 uppercase">Dosage *</label>
+          <input type="text" class="manual-med-dosage w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono font-bold" placeholder="e.g. 500 mg" value="${med.dosage || ''}">
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold text-slate-500 uppercase">Form</label>
+          <select class="manual-med-form w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg">
+            <option value="Tablet" ${med.form === 'Tablet' ? 'selected' : ''}>Tablet</option>
+            <option value="Capsule" ${med.form === 'Capsule' ? 'selected' : ''}>Capsule</option>
+            <option value="Inhaler" ${med.form === 'Inhaler' ? 'selected' : ''}>Inhaler</option>
+            <option value="Injection" ${med.form === 'Injection' ? 'selected' : ''}>Injection</option>
+            <option value="Liquid Solution" ${med.form === 'Liquid Solution' || med.form === 'Liquid' ? 'selected' : ''}>Liquid Solution</option>
+            <option value="Nasal Spray" ${med.form === 'Nasal Spray' ? 'selected' : ''}>Nasal Spray</option>
+            <option value="Topical Cream" ${med.form === 'Topical Cream' ? 'selected' : ''}>Topical Cream</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex-1">
+          <input type="text" class="manual-med-freq w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg" placeholder="Frequency & instructions (e.g. Twice daily with meals)" value="${med.frequency || ''}">
+        </div>
+        <button type="button" onclick="app.removeManualMedRow(this)" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="Remove row">
+          <i data-lucide="trash-2" class="w-4 h-4"></i>
+        </button>
+      </div>
+    `;
+    container.appendChild(row);
+    if (window.lucide) lucide.createIcons();
+  }
+
+  removeManualMedRow(btn) {
+    const row = btn.closest('.manual-med-row');
+    if (row) row.remove();
+  }
+
+  addManualAllergyRow(alg = {}) {
+    const container = document.getElementById('manualAllergiesContainer');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'manual-alg-row bg-rose-50/50 p-3 rounded-xl border border-rose-200 space-y-2';
+    row.innerHTML = `
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div>
+          <label class="block text-[10px] font-bold text-rose-800 uppercase">Allergen *</label>
+          <input type="text" class="manual-alg-name w-full px-2.5 py-1.5 text-xs bg-white border border-rose-200 rounded-lg font-bold" placeholder="e.g. Penicillin" value="${alg.allergen || ''}">
+        </div>
+        <div>
+          <label class="block text-[10px] font-bold text-rose-800 uppercase">Severity</label>
+          <select class="manual-alg-sev w-full px-2.5 py-1.5 text-xs bg-white border border-rose-200 rounded-lg">
+            <option value="Moderate" ${alg.severity === 'Moderate' ? 'selected' : ''}>Moderate (Rash/Urticaria)</option>
+            <option value="Severe" ${alg.severity === 'Severe' ? 'selected' : ''}>Severe (Angioedema/Wheezing)</option>
+            <option value="Life-Threatening" ${alg.severity === 'Life-Threatening' ? 'selected' : ''}>Life-Threatening (Anaphylaxis)</option>
+            <option value="Mild" ${alg.severity === 'Mild' ? 'selected' : ''}>Mild (Pruritus/Sneezing)</option>
+          </select>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <div class="flex-1">
+            <label class="block text-[10px] font-bold text-rose-800 uppercase">Reaction</label>
+            <input type="text" class="manual-alg-reaction w-full px-2.5 py-1.5 text-xs bg-white border border-rose-200 rounded-lg" placeholder="e.g. Hives, shortness of breath" value="${alg.reaction || ''}">
+          </div>
+          <button type="button" onclick="app.removeManualAllergyRow(this)" class="mt-4 p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition" title="Remove row">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    `;
+    container.appendChild(row);
+    if (window.lucide) lucide.createIcons();
+  }
+
+  removeManualAllergyRow(btn) {
+    const row = btn.closest('.manual-alg-row');
+    if (row) row.remove();
+  }
+
+  backToVerifySummary() {
+    const summaryView = document.getElementById('verifySummaryView');
+    const manualView = document.getElementById('verifyManualView');
+    const manualFooter = document.getElementById('verifyManualFooter');
+
+    if (summaryView) summaryView.classList.remove('hidden');
+    if (manualView) manualView.classList.add('hidden');
+    if (manualFooter) manualFooter.classList.add('hidden');
+  }
+
+  async saveManualRecordsToEhr() {
+    if (!this.currentPatient) return;
+
+    // Gather manual medications
+    const medications = [];
+    document.querySelectorAll('.manual-med-row').forEach(row => {
+      const name = row.querySelector('.manual-med-name')?.value?.trim();
+      const dosage = row.querySelector('.manual-med-dosage')?.value?.trim();
+      const form = row.querySelector('.manual-med-form')?.value || 'Tablet';
+      const freq = row.querySelector('.manual-med-freq')?.value?.trim() || 'Once daily';
+
+      if (name && dosage) {
+        medications.push({
+          drug_name: name,
+          dosage: dosage,
+          form: form,
+          frequency: freq,
+          time_of_day: 'Morning',
+          purpose: 'Manually verified prescription entry',
+          special_instructions: freq
+        });
+      }
+    });
+
+    // Gather manual allergies
+    const allergies = [];
+    document.querySelectorAll('.manual-alg-row').forEach(row => {
+      const name = row.querySelector('.manual-alg-name')?.value?.trim();
+      const sev = row.querySelector('.manual-alg-sev')?.value || 'Moderate';
+      const reaction = row.querySelector('.manual-alg-reaction')?.value?.trim() || 'Adverse reaction';
+
+      if (name) {
+        allergies.push({
+          allergen: name,
+          reaction: reaction,
+          severity: sev,
+          category: 'Drug',
+          verification_status: 'Confirmed',
+          notes: 'Manually confirmed by patient/clinician'
+        });
+      }
+    });
+
+    // Gather manual vitals
+    const vitals = [];
+    const bp = document.getElementById('manualVitBp')?.value?.trim();
+    const hr = parseInt(document.getElementById('manualVitHr')?.value?.trim()) || null;
+    const spo2 = parseInt(document.getElementById('manualVitSpo2')?.value?.trim()) || null;
+    const temp = parseFloat(document.getElementById('manualVitTemp')?.value?.trim()) || null;
+    const glucose = parseInt(document.getElementById('manualVitGlucose')?.value?.trim()) || null;
+
+    if (bp || hr || spo2 || temp || glucose) {
+      vitals.push({
+        blood_pressure: bp || '',
+        heart_rate: hr,
+        spo2: spo2,
+        temperature: temp,
+        blood_glucose: glucose,
+        recorded_by: 'Patient / Bedside Entry (Manual Confirmation)',
+        notes: 'Manually verified values'
+      });
+    }
+
+    // Gather conditions
+    const conditions = [];
+    const condRaw = document.getElementById('manualConditionsInput')?.value || '';
+    condRaw.split(',').map(s => s.trim()).filter(Boolean).forEach(c => {
+      conditions.push({
+        condition_name: c,
+        icd10_code: 'R69',
+        category: 'General Medical',
+        status: 'Active'
+      });
+    });
+
+    if (medications.length === 0 && allergies.length === 0 && vitals.length === 0 && conditions.length === 0) {
+      this.showToast('Please enter at least one medication, allergy, or vital sign.', 'error');
+      return;
+    }
+
+    const payload = {
+      medications,
+      allergies,
+      vitals,
+      conditions,
+      labs: [],
+      document_metadata: {
+        document_type: 'Prescription / Clinical Document (Manual Verification)',
+        file_name: 'manual_entry_' + Date.now() + '.jpg',
+        image_url: this.pendingVerification?.imgData || '',
+        raw_transcription: this.pendingVerification?.rawText || ''
+      }
+    };
+
+    try {
+      this.showToast('Saving manually entered records to SQLite...', 'info');
+      const res = await fetch(`/api/patients/${this.currentPatient.id}/commit-scanned-records`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error('Failed to save manual records');
+      const data = await res.json();
+
+      this.closeScanVerificationModal();
+      this.closeTranscriptionModal();
+      this.showToast(`Saved ${medications.length} meds, ${allergies.length} allergies, and vitals to patient EHR!`, 'success');
+
+      await this.loadPatient(this.currentPatient.id);
+      this.switchTab('medications');
+    } catch (err) {
+      this.showToast(err.message, 'error');
     }
   }
 
