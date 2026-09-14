@@ -285,9 +285,58 @@ export async function onRequest(context) {
         status: 'ok',
         provider: 'Cloudflare Pages + D1 Persistent SQLite',
         database: 'medipulse-db',
+        workersAI: !!env.AI,
         patientsCount: row ? row.count : 0,
         time: new Date().toISOString()
       });
+    }
+
+    // POST /api/transcribe-ai (Cloudflare Workers AI Llama 3.2 Vision)
+    if (fullPath === '/api/transcribe-ai' && method === 'POST') {
+      const AI = env.AI;
+      if (!AI) {
+        return jsonResponse({
+          error: 'Workers AI binding not attached to environment',
+          fallbackToClient: true
+        }, 503);
+      }
+
+      const body = await request.json();
+      const imgData = body.image;
+      if (!imgData) {
+        return jsonResponse({ error: 'Image data is required' }, 400);
+      }
+
+      try {
+        const base64Data = imgData.includes(',') ? imgData.split(',')[1] : imgData;
+        const binaryStr = atob(base64Data);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        const imageArray = [...bytes];
+
+        const prompt = body.prompt || 'Transcribe all handwritten and printed text from this medical prescription, lab report, or clinical note accurately. List all medications, dosages, directions/frequencies, allergies, vitals, and diagnoses exactly as written.';
+
+        const response = await AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+          image: imageArray,
+          prompt
+        });
+
+        const text = response?.response || response?.description || (typeof response === 'string' ? response : JSON.stringify(response));
+
+        return jsonResponse({
+          success: true,
+          provider: 'Cloudflare Workers AI (@cf/meta/llama-3.2-11b-vision-instruct)',
+          text
+        });
+      } catch (aiErr) {
+        console.warn('Workers AI Vision error:', aiErr);
+        return jsonResponse({
+          error: aiErr.message,
+          fallbackToClient: true
+        }, 502);
+      }
     }
 
     // GET /api/stats

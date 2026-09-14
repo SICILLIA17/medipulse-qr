@@ -983,13 +983,40 @@ class MediPulseApp {
 
     if (progressContainer) {
       progressContainer.classList.remove('hidden');
-      if (progressBar) progressBar.style.width = '15%';
-      if (progressPercent) progressPercent.textContent = '15%';
-      if (statusText) statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Initializing OCR engine...`;
+      if (progressBar) progressBar.style.width = '20%';
+      if (progressPercent) progressPercent.textContent = '20%';
+      if (statusText) statusText.innerHTML = `<i data-lucide="sparkles" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Connecting to Cloudflare Workers AI Vision...`;
       if (window.lucide) lucide.createIcons();
     }
 
-    // Client-side OCR via Tesseract.js
+    // 1. Try Cloudflare Workers AI Edge Multimodal Vision Model first
+    try {
+      const aiRes = await fetch('/api/transcribe-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imgData })
+      });
+
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        if (aiData.success && aiData.text && aiData.text.trim().length > 5) {
+          if (progressContainer) progressContainer.classList.add('hidden');
+          document.getElementById('rawTranscriptionText').value = aiData.text.trim();
+          this.reparseTranscriptionText();
+          this.showToast('Transcribed with Cloudflare Workers AI at the edge!', 'success');
+          return;
+        }
+      }
+    } catch (aiErr) {
+      console.warn('Workers AI call failed, falling back to local OCR:', aiErr);
+    }
+
+    // 2. Graceful Fallback: Client-side OCR via Tesseract.js
+    if (statusText) {
+      statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Running in-browser OCR engine...`;
+      if (window.lucide) lucide.createIcons();
+    }
+
     if (window.Tesseract) {
       try {
         const worker = await Tesseract.createWorker('eng', 1, {
