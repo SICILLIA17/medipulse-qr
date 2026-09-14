@@ -1,10 +1,7 @@
-// Cloudflare Pages Serverless Edge API Handler
-// Automatically handles all /api/* routes when hosted on Cloudflare Pages
+// Cloudflare Pages Serverless Edge API Handler — D1 Persistent Storage
+// Handles all /api/* routes. Uses Cloudflare D1 SQLite at the edge.
 
 import { SEED_PATIENTS } from '../data/seed-data.js';
-
-// In-memory edge cache clone for Cloudflare execution
-let edgePatients = JSON.parse(JSON.stringify(SEED_PATIENTS));
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -12,505 +9,335 @@ function jsonResponse(data, status = 200) {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type'
     }
   });
 }
 
-function findPatient(idOrCode) {
-  if (!idOrCode) return null;
-  const target = decodeURIComponent(idOrCode).toLowerCase();
-  return edgePatients.find(p =>
-    (p.id && p.id.toLowerCase() === target) ||
-    (p.qr_code && p.qr_code.toLowerCase() === target)
-  );
+function uid(prefix = 'id') {
+  return prefix + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+
+async function initDB(DB) {
+  await DB.exec(`
+    CREATE TABLE IF NOT EXISTS patients (
+      id TEXT PRIMARY KEY, qr_code TEXT UNIQUE NOT NULL,
+      first_name TEXT NOT NULL, last_name TEXT NOT NULL,
+      dob TEXT, gender TEXT, blood_type TEXT, phone TEXT, email TEXT, address TEXT,
+      organ_donor INTEGER DEFAULT 0, dnr_status INTEGER DEFAULT 0,
+      emergency_summary TEXT, avatar_url TEXT, primary_physician TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS notes (
+      id TEXT PRIMARY KEY, patient_id TEXT NOT NULL,
+      type TEXT, date TEXT, author TEXT, content TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS vitals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+      date TEXT, bp_systolic INTEGER, bp_diastolic INTEGER, heart_rate INTEGER,
+      weight_kg REAL, temperature REAL, oxygen_sat INTEGER, blood_glucose REAL, notes TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS allergies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+      allergen TEXT, reaction TEXT, severity TEXT, diagnosed TEXT,
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS medications (
+      id TEXT PRIMARY KEY, patient_id TEXT NOT NULL,
+      name TEXT, dose TEXT, frequency TEXT, route TEXT, prescriber TEXT,
+      start_date TEXT, end_date TEXT, status TEXT DEFAULT 'active', indication TEXT,
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS medication_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, medication_id TEXT NOT NULL,
+      date TEXT, change_desc TEXT, reason TEXT, changed_by TEXT,
+      FOREIGN KEY (medication_id) REFERENCES medications(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, patient_id TEXT NOT NULL,
+      timestamp TEXT DEFAULT (datetime('now')), action TEXT, user TEXT, details TEXT,
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS scanned_records (
+      id TEXT PRIMARY KEY, patient_id TEXT NOT NULL,
+      scan_date TEXT, scanned_by TEXT, location TEXT, records TEXT,
+      status TEXT DEFAULT 'pending', created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE CASCADE
+    );
+  `);
+}
+async function ensureSeeded(DB) {
+  await initDB(DB);
+  const row = await DB.prepare('SELECT COUNT(*) as count FROM patients').first();
+  if (row.count > 0) return;
+
+  const stmts = [];
+  for (const p of SEED_PATIENTS) {
+    stmts.push(DB.prepare(
+      `INSERT OR IGNORE INTO patients
+        (id,qr_code,first_name,last_name,dob,gender,blood_type,phone,email,
+         address,organ_donor,dnr_status,emergency_summary,avatar_url,primary_physician)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(p.id,p.qr_code,p.first_name,p.last_name,p.dob,p.gender,p.blood_type,
+           p.phone,p.email,p.address,p.organ_donor??0,p.dnr_status??0,
+           p.emergency_summary,p.avatar_url,p.primary_physician));
+
+    for (const n of (p.notes||[])) {
+      stmts.push(DB.prepare(
+        `INSERT OR IGNORE INTO notes (id,patient_id,type,date,author,content) VALUES (?,?,?,?,?,?)`
+      ).bind(n.id||uid('note'),p.id,n.type,n.date,n.author,n.content));
+    }
+    for (const v of (p.vitals||[])) {
+      stmts.push(DB.prepare(
+        `INSERT INTO vitals (patient_id,date,bp_systolic,bp_diastolic,heart_rate,weight_kg,temperature,oxygen_sat,blood_glucose,notes) VALUES (?,?,?,?,?,?,?,?,?,?)`
+      ).bind(p.id,v.date,v.bp_systolic||null,v.bp_diastolic||null,v.heart_rate||null,v.weight_kg||null,v.temperature||null,v.oxygen_sat||null,v.blood_glucose||null,v.notes||null));
+    }
+    for (const a of (p.allergies||[])) {
+      stmts.push(DB.prepare(
+        `INSERT INTO allergies (patient_id,allergen,reaction,severity,diagnosed) VALUES (?,?,?,?,?)`
+      ).bind(p.id,a.allergen,a.reaction,a.severity,a.diagnosed));
+    }
+    for (const m of (p.medications||[])) {
+      const mid = m.id||uid('med');
+      stmts.push(DB.prepare(
+        `INSERT OR IGNORE INTO medications (id,patient_id,name,dose,frequency,route,prescriber,start_date,end_date,status,indication) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+      ).bind(mid,p.id,m.name||m.drug_name,m.dose||m.dosage,m.frequency,m.route,m.prescriber||m.prescribing_doctor,m.start_date,m.end_date??null,m.status||(m.is_active?'active':'inactive'),m.indication||null));
+      for (const h of (m.history||m.titrations||[])) {
+        stmts.push(DB.prepare(
+          `INSERT INTO medication_history (medication_id,date,change_desc,reason,changed_by) VALUES (?,?,?,?,?)`
+        ).bind(mid,h.date,h.change||h.new_dosage,h.reason,h.by||h.changed_by));
+      }
+    }
+    for (const al of (p.audit_log||[])) {
+      stmts.push(DB.prepare(
+        `INSERT INTO audit_log (patient_id,timestamp,action,user,details) VALUES (?,?,?,?,?)`
+      ).bind(p.id,al.timestamp,al.action,al.user,al.details));
+    }
+  }
+  for (let i = 0; i < stmts.length; i += 100) {
+    await DB.batch(stmts.slice(i, i+100));
+  }
+}
+
+async function getPatient(DB, idOrCode) {
+  const t = decodeURIComponent(idOrCode);
+  const patient = await DB.prepare(
+    `SELECT * FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`
+  ).bind(t,t).first();
+  if (!patient) return null;
+  const [notes, vitals, allergies, meds, audit] = await Promise.all([
+    DB.prepare(`SELECT * FROM notes WHERE patient_id=? ORDER BY date DESC`).bind(patient.id).all(),
+    DB.prepare(`SELECT * FROM vitals WHERE patient_id=? ORDER BY date DESC`).bind(patient.id).all(),
+    DB.prepare(`SELECT * FROM allergies WHERE patient_id=?`).bind(patient.id).all(),
+    DB.prepare(`SELECT * FROM medications WHERE patient_id=? ORDER BY start_date DESC`).bind(patient.id).all(),
+    DB.prepare(`SELECT * FROM audit_log WHERE patient_id=? ORDER BY timestamp DESC LIMIT 50`).bind(patient.id).all(),
+  ]);
+  const medsWithHistory = await Promise.all((meds.results||[]).map(async m => {
+    const h = await DB.prepare(`SELECT * FROM medication_history WHERE medication_id=? ORDER BY date DESC`).bind(m.id).all();
+    return {...m, history: h.results||[]};
+  }));
+  return {...patient, notes:notes.results||[], vitals:vitals.results||[], allergies:allergies.results||[], medications:medsWithHistory, audit_log:audit.results||[]};
 }
 
 export async function onRequest(context) {
-  const { request, params } = context;
+  const { request, params, env } = context;
+  const DB = env.DB;
   const url = new URL(request.url);
   const method = request.method;
   const pathParts = params.path || [];
   const fullPath = '/api/' + (Array.isArray(pathParts) ? pathParts.join('/') : pathParts);
 
   if (method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      }
-    });
+    return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' } });
+  }
+
+  if (!DB) {
+    return jsonResponse({ error: 'D1 database not bound. Configure DB binding in Cloudflare Pages settings.' }, 503);
   }
 
   try {
-    // -------------------------------------------------------------
-    // GET /api/health
-    // -------------------------------------------------------------
+    await ensureSeeded(DB);
+
     if (fullPath === '/api/health' && method === 'GET') {
-      return jsonResponse({
-        status: 'ok',
-        provider: 'Cloudflare Pages Edge',
-        time: new Date().toISOString()
-      });
+      const row = await DB.prepare('SELECT COUNT(*) as count FROM patients').first();
+      return jsonResponse({ status: 'ok', provider: 'Cloudflare Pages + D1', patients: row.count, time: new Date().toISOString() });
     }
 
-    // -------------------------------------------------------------
-    // GET /api/stats
-    // -------------------------------------------------------------
-    if (fullPath === '/api/stats' && method === 'GET') {
-      let medsCount = 0;
-      let oldMedsCount = 0;
-      let titrationsCount = 0;
-      let notesCount = 0;
-      let severeAllergiesCount = 0;
-
-      edgePatients.forEach(p => {
-        (p.medications || []).forEach(m => {
-          if (m.is_active) medsCount++;
-          else oldMedsCount++;
-          titrationsCount += (m.titrations || []).length;
-        });
-        (p.allergies || []).forEach(a => {
-          if (a.severity === 'Life-Threatening' || a.severity === 'Severe') {
-            severeAllergiesCount++;
-          }
-        });
-        notesCount += (p.clinical_notes || []).length;
-      });
-
-      return jsonResponse({
-        patientCount: edgePatients.length,
-        medsCount,
-        oldMedsCount,
-        titrationsCount,
-        notesCount,
-        severeAllergiesCount
-      });
-    }
-
-    // -------------------------------------------------------------
-    // POST /api/reset-demo
-    // -------------------------------------------------------------
     if (fullPath === '/api/reset-demo' && method === 'POST') {
-      edgePatients = JSON.parse(JSON.stringify(SEED_PATIENTS));
-      return jsonResponse({ success: true, message: 'Reset edge demo data' });
+      await DB.batch([
+        DB.prepare('DELETE FROM medication_history'),
+        DB.prepare('DELETE FROM audit_log'),
+        DB.prepare('DELETE FROM scanned_records'),
+        DB.prepare('DELETE FROM notes'),
+        DB.prepare('DELETE FROM vitals'),
+        DB.prepare('DELETE FROM allergies'),
+        DB.prepare('DELETE FROM medications'),
+        DB.prepare('DELETE FROM patients'),
+      ]);
+      await ensureSeeded(DB);
+      return jsonResponse({ success: true, message: 'Reset to seed data' });
     }
 
-    // -------------------------------------------------------------
-    // GET /api/patients
-    // -------------------------------------------------------------
+    if (fullPath === '/api/stats' && method === 'GET') {
+      const [p,am,tm,n,sa] = await Promise.all([
+        DB.prepare('SELECT COUNT(*) as c FROM patients').first(),
+        DB.prepare("SELECT COUNT(*) as c FROM medications WHERE status='active'").first(),
+        DB.prepare('SELECT COUNT(*) as c FROM medications').first(),
+        DB.prepare('SELECT COUNT(*) as c FROM notes').first(),
+        DB.prepare("SELECT COUNT(*) as c FROM allergies WHERE severity IN ('Life-threatening','Severe','Serious')").first(),
+      ]);
+      return jsonResponse({ patientCount:p.c, medsCount:am.c, oldMedsCount:tm.c-am.c, notesCount:n.c, severeAllergiesCount:sa.c });
+    }
+
     if (fullPath === '/api/patients' && method === 'GET') {
-      const search = (url.searchParams.get('search') || '').toLowerCase();
-      const blood = url.searchParams.get('bloodType') || '';
-      let list = edgePatients.map(p => ({
-        ...p,
-        active_meds_count: (p.medications || []).filter(m => m.is_active).length,
-        allergies_count: (p.allergies || []).length
-      }));
-
-      if (blood) {
-        list = list.filter(p => p.blood_type === blood);
-      }
-      if (search) {
-        list = list.filter(p =>
-          (p.first_name && p.first_name.toLowerCase().includes(search)) ||
-          (p.last_name && p.last_name.toLowerCase().includes(search)) ||
-          (p.qr_code && p.qr_code.toLowerCase().includes(search)) ||
-          (p.phone && p.phone.toLowerCase().includes(search)) ||
-          (p.email && p.email.toLowerCase().includes(search))
-        );
-      }
-      return jsonResponse({ patients: list });
+      const search = (url.searchParams.get('search')||'').trim();
+      const blood = url.searchParams.get('bloodType')||'';
+      let q = `SELECT p.*, (SELECT COUNT(*) FROM medications m WHERE m.patient_id=p.id AND m.status='active') as active_meds_count, (SELECT COUNT(*) FROM allergies a WHERE a.patient_id=p.id) as allergies_count FROM patients p`;
+      const b = [];
+      const cond = [];
+      if (blood) { cond.push('p.blood_type=?'); b.push(blood); }
+      if (search) { cond.push('(p.first_name LIKE ? OR p.last_name LIKE ? OR p.qr_code LIKE ? OR p.phone LIKE ? OR p.email LIKE ?)'); const s=`%${search}%`; b.push(s,s,s,s,s); }
+      if (cond.length) q += ' WHERE '+cond.join(' AND ');
+      q += ' ORDER BY p.last_name, p.first_name';
+      const { results } = await DB.prepare(q).bind(...b).all();
+      return jsonResponse({ patients: results||[] });
     }
 
-    // -------------------------------------------------------------
-    // GET /api/patients/:id/trends
-    // -------------------------------------------------------------
-    const trendsMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/trends$/);
-    if (trendsMatch && method === 'GET') {
-      const idOrCode = trendsMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
-
-      const vitalsTimeline = (patient.vitals || []).map(v => {
-        let systolic = null;
-        let diastolic = null;
-        if (v.blood_pressure) {
-          const m = v.blood_pressure.match(/(\d+)\s*\/\s*(\d+)/);
-          if (m) {
-            systolic = parseInt(m[1]);
-            diastolic = parseInt(m[2]);
-          }
-        }
-        return {
-          id: v.id,
-          date: v.recorded_at,
-          systolic,
-          diastolic,
-          heartRate: v.heart_rate,
-          spo2: v.spo2,
-          temperature: v.temperature,
-          bloodGlucose: v.blood_glucose,
-          recordedBy: v.recorded_by
-        };
-      });
-
-      return jsonResponse({
-        success: true,
-        trends: {
-          patientId: patient.id,
-          vitalsTimeline,
-          labsTimeline: patient.lab_reports || []
-        }
-      });
+    const patientGet = fullPath.match(/^\/api\/patients\/([^/]+)$/);
+    if (patientGet && method === 'GET') {
+      const p = await getPatient(DB, patientGet[1]);
+      if (!p) return jsonResponse({ error: 'Patient not found' }, 404);
+      return jsonResponse({ patient: p });
     }
 
-    // -------------------------------------------------------------
-    // POST /api/patients/:id/notes
-    // -------------------------------------------------------------
-    const noteMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/notes$/);
-    if (noteMatch && method === 'POST') {
-      const idOrCode = noteMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
+    const trendsM = fullPath.match(/^\/api\/patients\/([^/]+)\/trends$/);
+    if (trendsM && method === 'GET') {
+      const t = decodeURIComponent(trendsM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
+      const v = await DB.prepare(`SELECT * FROM vitals WHERE patient_id=? ORDER BY date DESC`).bind(pat.id).all();
+      return jsonResponse({ success:true, trends:{ patientId:pat.id, vitalsTimeline:v.results||[] } });
+    }
+
+    const noteM = fullPath.match(/^\/api\/patients\/([^/]+)\/notes$/);
+    if (noteM && method === 'POST') {
+      const t = decodeURIComponent(noteM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
       const body = await request.json();
-      if (!body.assessment || !body.plan) {
-        return jsonResponse({ error: 'Assessment and Plan are required fields' }, 400);
-      }
-      const note = {
-        id: 'note-' + Math.random().toString(36).slice(2, 9),
-        encounter_type: body.encounter_type || 'Follow-up Consultation',
-        assessment: body.assessment,
-        plan: body.plan,
-        provider_name: body.provider_name || 'Dr. Sarah Jenkins, MD',
-        provider_role: body.provider_role || 'Attending Physician',
-        created_at: new Date().toISOString()
-      };
-      patient.clinical_notes = patient.clinical_notes || [];
-      patient.clinical_notes.unshift(note);
-      return jsonResponse({ success: true, note }, 201);
+      if (!body.content && !body.assessment) return jsonResponse({ error: 'content is required' }, 400);
+      const note = { id:uid('note'), patient_id:pat.id, type:body.type||body.encounter_type||'Progress Note', date:new Date().toISOString().slice(0,10), author:body.author||body.provider_name||'Clinical Staff', content:body.content||body.assessment||'' };
+      await DB.prepare(`INSERT INTO notes (id,patient_id,type,date,author,content) VALUES (?,?,?,?,?,?)`).bind(note.id,note.patient_id,note.type,note.date,note.author,note.content).run();
+      return jsonResponse({ success:true, note }, 201);
     }
 
-    // -------------------------------------------------------------
-    // POST /api/patients/:id/vitals
-    // -------------------------------------------------------------
-    const vitalsMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/vitals$/);
-    if (vitalsMatch && method === 'POST') {
-      const idOrCode = vitalsMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
+    const vitalsM = fullPath.match(/^\/api\/patients\/([^/]+)\/vitals$/);
+    if (vitalsM && method === 'POST') {
+      const t = decodeURIComponent(vitalsM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
       const body = await request.json();
-      const vitalsLog = {
-        id: 'vit-' + Math.random().toString(36).slice(2, 9),
-        blood_pressure: body.blood_pressure || null,
-        heart_rate: body.heart_rate ? parseInt(body.heart_rate) : null,
-        spo2: body.spo2 ? parseInt(body.spo2) : null,
-        temperature: body.temperature ? parseFloat(body.temperature) : null,
-        blood_glucose: body.blood_glucose ? parseInt(body.blood_glucose) : null,
-        recorded_at: new Date().toISOString(),
-        recorded_by: body.recorded_by || 'Clinical Staff'
-      };
-      patient.vitals = patient.vitals || [];
-      patient.vitals.unshift(vitalsLog);
-      return jsonResponse({ success: true, vitals: vitalsLog }, 201);
+      let sys=null,dia=null;
+      if (body.blood_pressure) { const m=String(body.blood_pressure).match(/(\d+)\s*\/\s*(\d+)/); if(m){sys=parseInt(m[1]);dia=parseInt(m[2]);} }
+      if (body.bp_systolic) sys=parseInt(body.bp_systolic);
+      if (body.bp_diastolic) dia=parseInt(body.bp_diastolic);
+      const r = await DB.prepare(`INSERT INTO vitals (patient_id,date,bp_systolic,bp_diastolic,heart_rate,weight_kg,temperature,oxygen_sat,blood_glucose,notes) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(pat.id,body.date||new Date().toISOString().slice(0,10),sys,dia,body.heart_rate?parseInt(body.heart_rate):null,body.weight_kg?parseFloat(body.weight_kg):null,body.temperature?parseFloat(body.temperature):null,body.spo2||body.oxygen_sat?parseInt(body.spo2||body.oxygen_sat):null,body.blood_glucose?parseFloat(body.blood_glucose):null,body.notes||null).run();
+      return jsonResponse({ success:true, id:r.meta.last_row_id }, 201);
     }
 
-    // -------------------------------------------------------------
-    // POST /api/patients/:id/allergies
-    // -------------------------------------------------------------
-    const allergyMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/allergies$/);
-    if (allergyMatch && method === 'POST') {
-      const idOrCode = allergyMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
+    const allergyM = fullPath.match(/^\/api\/patients\/([^/]+)\/allergies$/);
+    if (allergyM && method === 'POST') {
+      const t = decodeURIComponent(allergyM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
       const body = await request.json();
-      if (!body.allergen) {
-        return jsonResponse({ error: 'Allergen name is required' }, 400);
-      }
-      const allergy = {
-        id: 'alg-' + Math.random().toString(36).slice(2, 9),
-        allergen: body.allergen,
-        reaction: body.reaction || 'Unspecified allergic reaction',
-        severity: body.severity || 'Moderate',
-        category: body.category || 'Drug',
-        verification_status: body.verification_status || 'Confirmed',
-        diagnosed_date: body.diagnosed_date || new Date().toISOString().slice(0, 10),
-        notes: body.notes || ''
-      };
-      patient.allergies = patient.allergies || [];
-      patient.allergies.unshift(allergy);
-      return jsonResponse({ success: true, allergy }, 201);
+      if (!body.allergen) return jsonResponse({ error: 'allergen is required' }, 400);
+      const r = await DB.prepare(`INSERT INTO allergies (patient_id,allergen,reaction,severity,diagnosed) VALUES (?,?,?,?,?)`).bind(pat.id,body.allergen,body.reaction||'Allergic reaction',body.severity||'Moderate',body.diagnosed||body.diagnosed_date||new Date().toISOString().slice(0,10)).run();
+      return jsonResponse({ success:true, id:r.meta.last_row_id }, 201);
     }
 
-    // -------------------------------------------------------------
-    // POST /api/patients/:id/medications
-    // -------------------------------------------------------------
-    const addMedMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/medications$/);
-    if (addMedMatch && method === 'POST') {
-      const idOrCode = addMedMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
+    const addMedM = fullPath.match(/^\/api\/patients\/([^/]+)\/medications$/);
+    if (addMedM && method === 'POST') {
+      const t = decodeURIComponent(addMedM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
       const body = await request.json();
-      if (!body.drug_name || !body.dosage) {
-        return jsonResponse({ error: 'Drug name and dosage are required' }, 400);
-      }
-      const med = {
-        id: 'med-' + Math.random().toString(36).slice(2, 9),
-        drug_name: body.drug_name,
-        dosage: body.dosage,
-        frequency: body.frequency || 'Once daily',
-        route: body.route || 'Oral',
-        form: body.form || 'Tablet',
-        appearance: body.appearance || '',
-        prescribing_doctor: body.prescribing_doctor || 'Dr. Sarah Jenkins, MD',
-        start_date: body.start_date || new Date().toISOString().slice(0, 10),
-        is_active: 1,
-        titrations: []
-      };
-      patient.medications = patient.medications || [];
-      patient.medications.unshift(med);
-      return jsonResponse({ success: true, medication: med }, 201);
+      if (!body.name && !body.drug_name) return jsonResponse({ error: 'name is required' }, 400);
+      const mid = body.id||uid('med');
+      await DB.prepare(`INSERT INTO medications (id,patient_id,name,dose,frequency,route,prescriber,start_date,status,indication) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(mid,pat.id,body.name||body.drug_name,body.dose||body.dosage||null,body.frequency||'Once daily',body.route||'Oral',body.prescriber||body.prescribing_doctor||'Attending Physician',body.start_date||new Date().toISOString().slice(0,10),body.status||'active',body.indication||null).run();
+      return jsonResponse({ success:true, id:mid }, 201);
     }
 
-    // -------------------------------------------------------------
-    // POST /api/patients/:id/audit-scan
-    // -------------------------------------------------------------
-    const auditMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/audit-scan$/);
-    if (auditMatch && method === 'POST') {
-      const idOrCode = auditMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
-      const body = await request.json().catch(() => ({}));
-      const userAgent = request.headers.get('user-agent') || 'Unknown Device';
-      const scan = {
-        id: 'scn-' + Math.random().toString(36).slice(2, 9),
-        scanned_at: new Date().toISOString(),
-        scanner_role: body.scanner_role || 'Field Clinician',
-        scanner_device: userAgent.slice(0, 100),
-        location_approx: body.location_approx || 'Hospital Bedside'
-      };
-      patient.recent_scans = patient.recent_scans || [];
-      patient.recent_scans.unshift(scan);
-      return jsonResponse({ success: true, scan }, 200);
+    const medHistM = fullPath.match(/^\/api\/medications\/([^/]+)\/history$/);
+    if (medHistM && method === 'GET') {
+      const { results } = await DB.prepare(`SELECT * FROM medication_history WHERE medication_id=? ORDER BY date DESC`).bind(medHistM[1]).all();
+      return jsonResponse({ success:true, history:results||[] });
     }
 
-    // -------------------------------------------------------------
-    // GET /api/patients/:idOrCode
-    // -------------------------------------------------------------
-    const patientMatch = fullPath.match(/^\/api\/patients\/([^/]+)$/);
-    if (patientMatch && method === 'GET') {
-      const idOrCode = patientMatch[1];
-      const patient = findPatient(idOrCode);
-      if (!patient) return jsonResponse({ error: 'Patient not found' }, 404);
-      return jsonResponse({ patient });
-    }
-
-    // -------------------------------------------------------------
-    // POST /api/medications/:id/titrate
-    // -------------------------------------------------------------
-    const titrateMatch = fullPath.match(/^\/api\/medications\/([^/]+)\/titrate$/);
-    if (titrateMatch && method === 'POST') {
-      const medId = titrateMatch[1];
+    const patchStatM = fullPath.match(/^\/api\/medications\/([^/]+)\/status$/);
+    if (patchStatM && method === 'PATCH') {
       const body = await request.json();
-      if (!body.new_dosage) {
-        return jsonResponse({ error: 'New dosage is required' }, 400);
-      }
-      for (const p of edgePatients) {
-        const med = (p.medications || []).find(m => m.id === medId);
-        if (med) {
-          med.titrations = med.titrations || [];
-          med.titrations.unshift({
-            id: 'tit-' + Math.random().toString(36).slice(2, 9),
-            previous_dosage: med.dosage,
-            new_dosage: body.new_dosage,
-            reason: body.reason || 'Dosage adjusted',
-            changed_by: body.changed_by || 'Attending Physician',
-            changed_at: new Date().toISOString()
-          });
-          med.dosage = body.new_dosage;
-          if (body.new_frequency) med.frequency = body.new_frequency;
-          return jsonResponse({ success: true, medication: med });
-        }
-      }
-      return jsonResponse({ error: 'Medication not found' }, 404);
+      const s = (body.is_active || body.status === 'active') ? 'active' : 'inactive';
+      await DB.prepare(`UPDATE medications SET status=?, end_date=? WHERE id=?`).bind(s, s==='inactive'?new Date().toISOString().slice(0,10):null, patchStatM[1]).run();
+      return jsonResponse({ success:true, status:s });
     }
 
-    // -------------------------------------------------------------
-    // GET /api/medications/:id/history
-    // -------------------------------------------------------------
-    const medHistoryMatch = fullPath.match(/^\/api\/medications\/([^/]+)\/history$/);
-    if (medHistoryMatch && method === 'GET') {
-      const medId = medHistoryMatch[1];
-      for (const p of edgePatients) {
-        const med = (p.medications || []).find(m => m.id === medId);
-        if (med) {
-          return jsonResponse({ success: true, history: med.titrations || [] });
-        }
-      }
-      return jsonResponse({ error: 'Medication not found' }, 404);
-    }
-
-    // -------------------------------------------------------------
-    // POST /api/medications/:id/discontinue
-    // -------------------------------------------------------------
-    const discMatch = fullPath.match(/^\/api\/medications\/([^/]+)\/discontinue$/);
-    if (discMatch && method === 'POST') {
-      const medId = discMatch[1];
+    const titrateM = fullPath.match(/^\/api\/medications\/([^/]+)\/titrate$/);
+    if (titrateM && method === 'POST') {
       const body = await request.json();
-      for (const p of edgePatients) {
-        const med = (p.medications || []).find(m => m.id === medId);
-        if (med) {
-          med.is_active = 0;
-          med.discontinued_reason = body.reason || 'Discontinued by clinician';
-          med.discontinued_date = new Date().toISOString().slice(0, 10);
-          med.discontinued_by = body.discontinued_by || 'Dr. Sarah Jenkins, MD';
-          return jsonResponse({ success: true, medication: med });
-        }
-      }
-      return jsonResponse({ error: 'Medication not found' }, 404);
+      if (!body.new_dosage) return jsonResponse({ error: 'new_dosage required' }, 400);
+      const med = await DB.prepare(`SELECT * FROM medications WHERE id=?`).bind(titrateM[1]).first();
+      if (!med) return jsonResponse({ error: 'Medication not found' }, 404);
+      await DB.batch([
+        DB.prepare(`INSERT INTO medication_history (medication_id,date,change_desc,reason,changed_by) VALUES (?,?,?,?,?)`).bind(med.id,new Date().toISOString().slice(0,10),`${med.dose} → ${body.new_dosage}`,body.reason||'Adjusted',body.changed_by||'Clinician'),
+        DB.prepare(`UPDATE medications SET dose=? WHERE id=?`).bind(body.new_dosage, med.id)
+      ]);
+      return jsonResponse({ success:true });
     }
 
-    // -------------------------------------------------------------
-    // POST /api/medications/:id/reactivate
-    // -------------------------------------------------------------
-    const reactMatch = fullPath.match(/^\/api\/medications\/([^/]+)\/reactivate$/);
-    if (reactMatch && method === 'POST') {
-      const medId = reactMatch[1];
-      const body = await request.json().catch(() => ({}));
-      for (const p of edgePatients) {
-        const med = (p.medications || []).find(m => m.id === medId);
-        if (med) {
-          med.is_active = 1;
-          med.discontinued_reason = null;
-          med.start_date = new Date().toISOString().slice(0, 10);
-          if (body.dosage) med.dosage = body.dosage;
-          return jsonResponse({ success: true, medication: med });
-        }
-      }
-      return jsonResponse({ error: 'Medication not found' }, 404);
+    const discM = fullPath.match(/^\/api\/medications\/([^/]+)\/discontinue$/);
+    if (discM && method === 'POST') {
+      await DB.prepare(`UPDATE medications SET status='inactive', end_date=? WHERE id=?`).bind(new Date().toISOString().slice(0,10), discM[1]).run();
+      return jsonResponse({ success:true });
     }
 
-    // -------------------------------------------------------------
-    // PATCH /api/medications/:id/status
-    // -------------------------------------------------------------
-    const patchStatusMatch = fullPath.match(/^\/api\/medications\/([^/]+)\/status$/);
-    if (patchStatusMatch && method === 'PATCH') {
-      const medId = patchStatusMatch[1];
+    const reactM = fullPath.match(/^\/api\/medications\/([^/]+)\/reactivate$/);
+    if (reactM && method === 'POST') {
+      await DB.prepare(`UPDATE medications SET status='active', end_date=NULL WHERE id=?`).bind(reactM[1]).run();
+      return jsonResponse({ success:true });
+    }
+
+    const auditM = fullPath.match(/^\/api\/patients\/([^/]+)\/audit-scan$/);
+    if (auditM && method === 'POST') {
+      const t = decodeURIComponent(auditM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
+      const body = await request.json().catch(()=>({}));
+      await DB.prepare(`INSERT INTO audit_log (patient_id,timestamp,action,user,details) VALUES (?,?,?,?,?)`).bind(pat.id,new Date().toISOString(),'scan',body.scanner_role||'Field Clinician',body.location_approx||'Hospital').run();
+      return jsonResponse({ success:true });
+    }
+
+    const commitM = fullPath.match(/^\/api\/patients\/([^/]+)\/commit-scanned-records$/);
+    if (commitM && method === 'POST') {
+      const t = decodeURIComponent(commitM[1]);
+      const pat = await DB.prepare(`SELECT id FROM patients WHERE id=? OR qr_code=? COLLATE NOCASE LIMIT 1`).bind(t,t).first();
+      if (!pat) return jsonResponse({ error: 'Patient not found' }, 404);
       const body = await request.json();
-      for (const p of edgePatients) {
-        const med = (p.medications || []).find(m => m.id === medId);
-        if (med) {
-          med.is_active = body.is_active ? 1 : 0;
-          return jsonResponse({ success: true, medication: med });
-        }
-      }
-      return jsonResponse({ error: 'Medication not found' }, 404);
+      const stmts = [];
+      let mc=0,ac=0,vc=0;
+      for (const m of (body.medications||[])) { stmts.push(DB.prepare(`INSERT INTO medications (id,patient_id,name,dose,frequency,route,start_date,status) VALUES (?,?,?,?,?,?,?,?)`).bind(uid('med'),pat.id,m.drug_name||m.name,m.dosage||m.dose,m.frequency||'Daily',m.route||'Oral',new Date().toISOString().slice(0,10),'active')); mc++; }
+      for (const a of (body.allergies||[])) { stmts.push(DB.prepare(`INSERT INTO allergies (patient_id,allergen,reaction,severity) VALUES (?,?,?,?)`).bind(pat.id,a.allergen,a.reaction||'Allergic reaction',a.severity||'Moderate')); ac++; }
+      for (const v of (body.vitals||[])) { stmts.push(DB.prepare(`INSERT INTO vitals (patient_id,date,bp_systolic,bp_diastolic,heart_rate,temperature,oxygen_sat,blood_glucose) VALUES (?,?,?,?,?,?,?,?)`).bind(pat.id,new Date().toISOString().slice(0,10),v.bp_systolic||null,v.bp_diastolic||null,v.heart_rate||null,v.temperature||null,v.spo2||v.oxygen_sat||null,v.blood_glucose||null)); vc++; }
+      if (stmts.length) await DB.batch(stmts);
+      return jsonResponse({ success:true, committed:{ medicationsCount:mc, allergiesCount:ac, vitalsCount:vc } }, 201);
     }
 
-    // -------------------------------------------------------------
-    // POST /api/patients/:id/commit-scanned-records
-    // -------------------------------------------------------------
-    const commitMatch = fullPath.match(/^\/api\/patients\/([^/]+)\/commit-scanned-records$/);
-    if (commitMatch && method === 'POST') {
-      const patientId = commitMatch[1];
-      const body = await request.json();
-      const p = findPatient(patientId);
-      if (p) {
-        let medicationsCount = 0;
-        let allergiesCount = 0;
-        let vitalsCount = 0;
-        let conditionsCount = 0;
-        let labsCount = 0;
-
-        p.medications = p.medications || [];
-        (body.medications || []).forEach(m => {
-          p.medications.push({
-            id: 'med-' + Math.random().toString(36).slice(2, 9),
-            drug_name: m.drug_name,
-            dosage: m.dosage,
-            frequency: m.frequency || 'Daily',
-            form: m.form || 'Tablet',
-            route: m.route || 'Oral',
-            is_active: 1,
-            start_date: new Date().toISOString().slice(0, 10),
-            titrations: []
-          });
-          medicationsCount++;
-        });
-
-        p.allergies = p.allergies || [];
-        (body.allergies || []).forEach(a => {
-          p.allergies.push({
-            id: 'alg-' + Math.random().toString(36).slice(2, 9),
-            allergen: a.allergen,
-            reaction: a.reaction || 'Allergic reaction',
-            severity: a.severity || 'Moderate',
-            category: a.category || 'Drug',
-            verification_status: 'Confirmed',
-            diagnosed_date: new Date().toISOString().slice(0, 10)
-          });
-          allergiesCount++;
-        });
-
-        p.vitals = p.vitals || [];
-        (body.vitals || []).forEach(v => {
-          p.vitals.unshift({
-            id: 'vit-' + Math.random().toString(36).slice(2, 9),
-            blood_pressure: v.blood_pressure || null,
-            heart_rate: v.heart_rate || null,
-            spo2: v.spo2 || null,
-            temperature: v.temperature || null,
-            blood_glucose: v.blood_glucose || null,
-            recorded_at: new Date().toISOString(),
-            recorded_by: 'OCR Scanner Intake'
-          });
-          vitalsCount++;
-        });
-
-        p.chronic_conditions = p.chronic_conditions || [];
-        (body.conditions || []).forEach(c => {
-          p.chronic_conditions.push({
-            id: 'cnd-' + Math.random().toString(36).slice(2, 9),
-            condition_name: c.condition_name,
-            icd10_code: c.icd10_code || 'Unspecified',
-            category: c.category || 'General',
-            status: 'Active',
-            diagnosed_date: new Date().toISOString().slice(0, 10)
-          });
-          conditionsCount++;
-        });
-
-        p.lab_reports = p.lab_reports || [];
-        (body.labs || []).forEach(l => {
-          p.lab_reports.unshift({
-            id: 'lab-' + Math.random().toString(36).slice(2, 9),
-            test_name: l.test_name,
-            result_value: l.result_value,
-            reference_range: l.reference_range || 'Normal',
-            flag: l.flag || 'Normal',
-            specimen_date: new Date().toISOString().slice(0, 10)
-          });
-          labsCount++;
-        });
-
-        return jsonResponse({
-          success: true,
-          committed: {
-            medicationsCount,
-            allergiesCount,
-            vitalsCount,
-            conditionsCount,
-            labsCount
-          }
-        }, 201);
-      }
-      return jsonResponse({ error: 'Patient not found' }, 404);
-    }
-
-    // Default fallback
     return jsonResponse({ error: 'Endpoint not found', path: fullPath }, 404);
   } catch (err) {
     return jsonResponse({ error: err.message }, 500);

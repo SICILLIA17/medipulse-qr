@@ -1,4 +1,8 @@
 name = "medipulse"
-compatibility_date = "2024-09-01"
+compatibility_date = "2024-09-23"
 pages_build_output_dir = "public"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "medipulse-db"
+database_id = "b991b234-6cb3-49f3-b7c1-7936d00b0cc5"
