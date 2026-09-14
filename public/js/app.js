@@ -835,9 +835,7 @@ class MediPulseApp {
   // -------------------------------------------------------------
   openTranscriptionModal() {
     document.getElementById('transcriptionModal').classList.remove('hidden');
-    if (!this.extractedEntitiesDraft) {
-      this.loadSampleDocument('doc-rx-1');
-    }
+    if (window.lucide) lucide.createIcons();
   }
 
   closeTranscriptionModal() {
@@ -946,15 +944,105 @@ class MediPulseApp {
     this.processDocumentImage(imgData);
   }
 
+  async handlePdfDocument(file) {
+    const progressContainer = document.getElementById('ocrProgressContainer');
+    const progressBar = document.getElementById('ocrProgressBar');
+    const progressPercent = document.getElementById('ocrProgressPercent');
+    const statusText = document.getElementById('ocrStatusText');
+
+    if (progressContainer) {
+      progressContainer.classList.remove('hidden');
+      if (progressBar) progressBar.style.width = '25%';
+      if (progressPercent) progressPercent.textContent = '25%';
+      if (statusText) statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Loading PDF document...`;
+      if (window.lucide) lucide.createIcons();
+    }
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      if (!window.pdfjsLib) {
+        throw new Error('PDF.js library is not loaded. Please refresh or check connection.');
+      }
+
+      const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      
+      let fullText = '';
+      let firstPageImgData = '';
+
+      const numPages = Math.min(pdf.numPages, 5); // Read up to first 5 pages of reports
+      for (let i = 1; i <= numPages; i++) {
+        if (statusText) {
+          statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Reading PDF page ${i} of ${numPages}...`;
+        }
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        if (pageText.trim()) {
+          fullText += `\n--- PAGE ${i} ---\n` + pageText + '\n';
+        }
+
+        // Render page 1 to high-resolution canvas for preview and visual verification
+        if (i === 1) {
+          const viewport = page.getViewport({ scale: 2.0 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          firstPageImgData = canvas.toDataURL('image/jpeg', 0.90);
+        }
+      }
+
+      this.currentDocImageData = firstPageImgData;
+      const preview = document.getElementById('docPreviewContainer');
+      if (preview && firstPageImgData) {
+        preview.innerHTML = `
+          <div class="relative w-full h-[240px] flex items-center justify-center">
+            <img src="${firstPageImgData}" class="max-h-[220px] rounded-xl object-contain mx-auto shadow-md" alt="PDF Document Preview">
+            <span class="absolute top-2 left-2 bg-slate-900/80 text-white text-[11px] font-mono px-2 py-0.5 rounded-lg border border-slate-700">
+              PDF (${pdf.numPages} ${pdf.numPages === 1 ? 'page' : 'pages'})
+            </span>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+      }
+
+      if (progressContainer) progressContainer.classList.add('hidden');
+
+      // If clean digital text exists in the PDF, use it directly (100% loss-free precision)
+      if (fullText.trim().length > 30) {
+        document.getElementById('rawTranscriptionText').value = fullText.trim();
+        const parsed = this.reparseTranscriptionText();
+        this.showScanVerificationModal(parsed, fullText.trim(), firstPageImgData);
+        this.showToast('PDF loaded with 100% digital accuracy! Please confirm detected values.', 'success');
+      } else if (firstPageImgData) {
+        // Scanned/image PDF without digital text: run through OCR engine
+        this.showToast('Scanned image PDF detected. Running OCR engine...', 'info');
+        await this.processDocumentImage(firstPageImgData);
+      } else {
+        throw new Error('Could not extract content from PDF.');
+      }
+    } catch (err) {
+      console.error('PDF parsing error:', err);
+      if (progressContainer) progressContainer.classList.add('hidden');
+      this.showToast('PDF load error: ' + err.message, 'error');
+    }
+  }
+
   async handleDocumentFileUpload(event) {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      this.processDocumentImage(e.target.result);
-    };
-    reader.readAsDataURL(file);
+    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      await this.handlePdfDocument(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        this.processDocumentImage(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
     event.target.value = '';
   }
 
@@ -1394,7 +1482,7 @@ class MediPulseApp {
     // Build Detected Entities Summary Cards
     let html = '';
     const p = this.pendingVerification.parsed;
-    const totalCount = (p.medications?.length || 0) + (p.allergies?.length || 0) + (p.vitals?.length || 0) + (p.conditions?.length || 0);
+    const totalCount = (p.medications?.length || 0) + (p.allergies?.length || 0) + (p.vitals?.length || 0) + (p.conditions?.length || 0) + (p.labs?.length || 0);
 
     if (totalCount === 0) {
       html = `
@@ -1486,6 +1574,35 @@ class MediPulseApp {
           </div>
         `;
       }
+
+      // Labs & Biomarkers card
+      if (p.labs && p.labs.length > 0) {
+        html += `
+          <div class="bg-white rounded-2xl p-3.5 border border-cyan-200 shadow-sm space-y-2">
+            <span class="text-xs font-bold text-cyan-800 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="flask-conical" class="w-4 h-4 text-cyan-600"></i> Detected Lab Tests & Biomarkers (${p.labs.length})
+            </span>
+            <div class="divide-y divide-slate-100">
+              ${p.labs.map(l => `
+                <div class="py-2 first:pt-0 last:pb-0 text-xs flex items-center justify-between">
+                  <div>
+                    <strong class="text-slate-900 font-extrabold text-sm">${l.test_name}</strong>
+                    <p class="text-slate-500 text-[11px] mt-0.5">Category: ${l.category || 'Diagnostic'}${l.reference_range ? ` • Ref: <span class="font-mono text-slate-700">${l.reference_range}</span>` : ''}</p>
+                  </div>
+                  <div class="text-right flex items-center gap-2">
+                    <span class="font-mono font-black text-slate-900 text-sm">${l.result_value}</span>
+                    <span class="px-2 py-0.5 text-[10px] font-black uppercase rounded ${
+                      l.flag === 'High' ? 'bg-amber-100 text-amber-800' :
+                      l.flag === 'Low' ? 'bg-blue-100 text-blue-800' :
+                      l.flag === 'Critical' ? 'bg-rose-600 text-white' : 'bg-emerald-100 text-emerald-800'
+                    }">${l.flag || 'Normal'}</span>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
     }
 
     if (container) container.innerHTML = html;
@@ -1567,9 +1684,11 @@ class MediPulseApp {
 
     const medsContainer = document.getElementById('manualMedsContainer');
     const algContainer = document.getElementById('manualAllergiesContainer');
+    const labsContainer = document.getElementById('manualLabsContainer');
 
     if (medsContainer) medsContainer.innerHTML = '';
     if (algContainer) algContainer.innerHTML = '';
+    if (labsContainer) labsContainer.innerHTML = '';
 
     const p = this.pendingVerification?.parsed || {};
 
@@ -1585,6 +1704,13 @@ class MediPulseApp {
       p.allergies.forEach(a => this.addManualAllergyRow(a));
     } else {
       this.addManualAllergyRow();
+    }
+
+    // Populate labs & biomarkers (HbA1c, RBC, WBC, etc.)
+    if (p.labs && p.labs.length > 0) {
+      p.labs.forEach(l => this.addManualLabRow(l));
+    } else {
+      this.addManualLabRow();
     }
 
     // Populate vitals
@@ -1695,6 +1821,46 @@ class MediPulseApp {
     if (row) row.remove();
   }
 
+  addManualLabRow(lab = {}) {
+    const container = document.getElementById('manualLabsContainer');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'manual-lab-row bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 text-xs animate-in fade-in duration-150';
+    row.innerHTML = `
+      <div class="flex-1">
+        <label class="block text-[10px] font-bold text-cyan-800 uppercase sm:hidden">Test Name *</label>
+        <input type="text" class="manual-lab-name w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 focus:ring-1 focus:ring-cyan-500" placeholder="Biomarker Name (e.g. HbA1c, RBC Count, Platelets)" value="${lab.test_name || ''}">
+      </div>
+      <div class="w-full sm:w-32">
+        <label class="block text-[10px] font-bold text-slate-500 uppercase sm:hidden">Result Value *</label>
+        <input type="text" class="manual-lab-val w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 focus:ring-1 focus:ring-cyan-500" placeholder="Value (e.g. 6.4 %)" value="${lab.result_value || ''}">
+      </div>
+      <div class="w-full sm:w-32">
+        <label class="block text-[10px] font-bold text-slate-500 uppercase sm:hidden">Ref Range</label>
+        <input type="text" class="manual-lab-ref w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-600 focus:ring-1 focus:ring-cyan-500" placeholder="Ref (e.g. < 5.7 %)" value="${lab.reference_range || ''}">
+      </div>
+      <div class="w-full sm:w-28">
+        <label class="block text-[10px] font-bold text-slate-500 uppercase sm:hidden">Flag</label>
+        <select class="manual-lab-flag w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800">
+          <option value="Normal" ${lab.flag === 'Normal' ? 'selected' : ''}>Normal</option>
+          <option value="High" ${lab.flag === 'High' ? 'selected' : ''}>High</option>
+          <option value="Low" ${lab.flag === 'Low' ? 'selected' : ''}>Low</option>
+          <option value="Critical" ${lab.flag === 'Critical' ? 'selected' : ''}>Critical</option>
+        </select>
+      </div>
+      <button type="button" onclick="app.removeManualLabRow(this)" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0 self-end sm:self-auto" title="Delete Lab Row">
+        <i data-lucide="trash-2" class="w-4 h-4"></i>
+      </button>
+    `;
+    container.appendChild(row);
+    if (window.lucide) lucide.createIcons();
+  }
+
+  removeManualLabRow(btn) {
+    const row = btn.closest('.manual-lab-row');
+    if (row) row.remove();
+  }
+
   backToVerifySummary() {
     const summaryView = document.getElementById('verifySummaryView');
     const manualView = document.getElementById('verifyManualView');
@@ -1748,6 +1914,25 @@ class MediPulseApp {
       }
     });
 
+    // Gather manual labs & biomarkers
+    const labs = [];
+    document.querySelectorAll('.manual-lab-row').forEach(row => {
+      const name = row.querySelector('.manual-lab-name')?.value?.trim();
+      const val = row.querySelector('.manual-lab-val')?.value?.trim();
+      const ref = row.querySelector('.manual-lab-ref')?.value?.trim() || '';
+      const flag = row.querySelector('.manual-lab-flag')?.value || 'Normal';
+
+      if (name && val) {
+        labs.push({
+          test_name: name,
+          result_value: val,
+          reference_range: ref,
+          flag: flag,
+          category: 'Diagnostic Panel'
+        });
+      }
+    });
+
     // Gather manual vitals
     const vitals = [];
     const bp = document.getElementById('manualVitBp')?.value?.trim();
@@ -1780,8 +1965,8 @@ class MediPulseApp {
       });
     });
 
-    if (medications.length === 0 && allergies.length === 0 && vitals.length === 0 && conditions.length === 0) {
-      this.showToast('Please enter at least one medication, allergy, or vital sign.', 'error');
+    if (medications.length === 0 && allergies.length === 0 && vitals.length === 0 && conditions.length === 0 && labs.length === 0) {
+      this.showToast('Please enter at least one medication, allergy, vital sign, or lab test.', 'error');
       return;
     }
 
@@ -1790,7 +1975,7 @@ class MediPulseApp {
       allergies,
       vitals,
       conditions,
-      labs: [],
+      labs,
       document_metadata: {
         document_type: 'Prescription / Clinical Document (Manual Verification)',
         file_name: 'manual_entry_' + Date.now() + '.jpg',
@@ -1812,10 +1997,14 @@ class MediPulseApp {
 
       this.closeScanVerificationModal();
       this.closeTranscriptionModal();
-      this.showToast(`Saved ${medications.length} meds, ${allergies.length} allergies, and vitals to patient EHR!`, 'success');
+      this.showToast(`Saved records (${medications.length} meds, ${allergies.length} allergies, ${labs.length} labs) to patient EHR!`, 'success');
 
       await this.loadPatient(this.currentPatient.id);
-      this.switchTab('medications');
+      if (labs.length > 0 && medications.length === 0) {
+        this.switchTab('vitals');
+      } else {
+        this.switchTab('medications');
+      }
     } catch (err) {
       this.showToast(err.message, 'error');
     }

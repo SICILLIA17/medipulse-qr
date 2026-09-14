@@ -316,12 +316,17 @@ export async function onRequest(context) {
         }
         const imageArray = [...bytes];
 
-        const prompt = body.prompt || `You are an expert clinical OCR and medical transcription specialist.
-Transcribe all text from this medical prescription, lab report, discharge summary, or doctor note with absolute medical accuracy.
-Extract and clearly label each section using these exact headers:
+        const prompt = body.prompt || `You are an expert clinical OCR and medical laboratory transcription specialist.
+Transcribe every single piece of medical data, lab test result, biomarker, diagnostic metric, and prescription from this document with absolute precision.
+Do not omit ANY lab test or parameter (e.g. HbA1c, RBC Count, WBC Count, Platelets, Hemoglobin, Fasting Blood Sugar, Creatinine, Lipid profile, etc.).
+
+Organize your transcription under these exact headers:
+
+LABS & DIAGNOSTIC BIOMARKERS:
+- [Test Name]: [Result Value] [Units] | Reference Range: [Normal Range] | Flag: [Normal/High/Low/Critical]
 
 MEDICATIONS:
-- [Drug Name] [Dosage] [Form] [Frequency/Instructions]
+- [Drug Name] [Dosage] [Form] [Frequency / Instructions]
 
 ALLERGIES:
 - [Allergen] ([Reaction, Severity])
@@ -329,13 +334,13 @@ ALLERGIES:
 VITALS:
 - BP: [Blood Pressure] mmHg, HR: [Heart Rate] bpm, SpO2: [%], Temp: [°C/°F], Glucose: [mg/dL]
 
-DIAGNOSES:
+DIAGNOSES & CONDITIONS:
 - [Condition Name]
 
-LABS:
-- [Test Name]: [Result Value]
+OTHER FINDINGS & NOTES:
+- [Any additional clinical remarks]
 
-Output ONLY the clear clinical transcription. Do not include any greeting, conversational preamble, explanatory notes, or code blocks.`;
+Output ONLY the structured clinical transcription. Do not include any greeting, conversational preamble, explanatory notes, or code blocks.`;
 
         const response = await AI.run('@cf/meta/llama-3.2-11b-vision-instruct', {
           image: imageArray,
@@ -753,11 +758,11 @@ Output ONLY the clear clinical transcription. Do not include any greeting, conve
       for (const m of (body.medications || [])) {
         stmts.push(DB.prepare(`
           INSERT INTO medications (
-            id, patient_id, drug_name, dosage, frequency, form, route, is_active, start_date
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, date('now'))
+            id, patient_id, drug_name, dosage, frequency, form, is_active, start_date, purpose, special_instructions
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, date('now'), 'Transcribed from medical document', ?)
         `).bind(
-          uid('med'), p.id, m.drug_name, m.dosage, m.frequency || 'Daily',
-          m.form || 'Tablet', m.route || 'Oral'
+          uid('med'), p.id, m.drug_name, m.dosage, m.frequency || 'Once daily',
+          m.form || 'Tablet', m.special_instructions || m.frequency || 'Take as directed'
         ));
         medicationsCount++;
       }

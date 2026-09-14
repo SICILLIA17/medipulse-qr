@@ -200,6 +200,37 @@ async function runTests() {
     const indexRes = await request({ path: '/index.html', method: 'GET' });
     assert(indexRes.statusCode === 200 && indexRes.body.includes('scanVerificationModal') && indexRes.body.includes('verifySummaryView'), 'Index delivers scan verification popup with Yes/No confirmation & manual form');
 
+    // 16. Comprehensive Lab Biomarkers Extraction (HbA1c / H1bac, RBC, WBC, Platelets, Creatinine)
+    const labReportText = `
+    PATHOLOGY & BIOCHEMISTRY REPORT
+    Patient: Eleanor Vance
+    COMPLETE BLOOD COUNT:
+    RBC Count: 4.85 mil/uL (Ref: 4.2 - 5.4)
+    WBC Count: 7.2 x10^3/uL (Ref: 4.0 - 11.0)
+    Hemoglobin: 13.8 g/dL (Ref: 12.0 - 16.0)
+    Platelet Count: 240 x10^3/uL (Ref: 150 - 450)
+
+    BIOCHEMISTRY:
+    H1bac: 6.8 % (Ref: < 5.7) High
+    Serum Creatinine: 1.1 mg/dL (Ref: 0.6 - 1.2)
+    TSH: 2.4 uIU/mL (Ref: 0.4 - 4.0)
+    Fasting Blood Sugar: 128 mg/dL (Ref: 70 - 99) High
+    `;
+    const labParsed = parser.parseText(labReportText);
+    assert(labParsed.labs.length >= 6, 'ClinicalParser extracts all comprehensive lab panels & diagnostic tests');
+    const rbcFound = labParsed.labs.find(l => /rbc/i.test(l.test_name));
+    assert(rbcFound && rbcFound.result_value.includes('4.85'), 'Parser accurately identifies RBC Count with value');
+    const hba1cFound = labParsed.labs.find(l => /hba1c|h1bac/i.test(l.test_name));
+    assert(hba1cFound && hba1cFound.result_value.includes('6.8'), 'Parser extracts HbA1c/H1bac glycemic marker');
+
+    // 17. Verify PDF.js and PDF Upload Support in index.html
+    assert(indexRes.body.includes('pdf.min.js'), 'index.html includes PDF.js library for lossless digital PDF parsing');
+    assert(indexRes.body.includes('docPdfUploadInput') && indexRes.body.includes('Upload PDF'), 'index.html provides direct Upload PDF button');
+    assert(indexRes.body.includes('manualLabsContainer'), 'index.html provides dynamic manual labs editing section');
+
+    // 18. Verify Dummy Documents are NOT pre-loaded in the modal
+    assert(!indexRes.body.includes('app.loadSampleDocument(\'doc-rx-1\')'), 'Dummy sample document buttons removed from transcription modal');
+
     console.log('----------------------------------------------------');
     console.log(`EXPANDED TEST RUN FINISHED: ${passed} PASSED, ${failed} FAILED`);
   } finally {

@@ -392,50 +392,178 @@
 
     extractLabs(text) {
       const labs = [];
-      const lines = text.split('\n');
+      const lines = text.replace(/\r\n/g, '\n').split('\n');
+      const seenTests = new Set();
+      let inLabSection = false;
 
+      // Comprehensive dictionary of common clinical biomarkers and diagnostic tests
       const knownLabNames = [
-        'hba1c', 'egfr', 'inr', 'prothrombin', 'ldl', 'hdl', 'cholesterol',
-        'triglycerides', 'creatinine', 'bun', 'potassium', 'sodium', 'alt',
-        'ast', 'tsh', 'ige', 'hemoglobin', 'wbc', 'platelet', 'crp', 'glucose'
+        'hba1c', 'h1bac', 'glycated hemoglobin', 'glycosylated hemoglobin',
+        'rbc', 'rbc count', 'red blood cell', 'red blood cells', 'erythrocyte count',
+        'wbc', 'wbc count', 'white blood cell', 'white blood cells', 'total leukocyte count', 'tlc',
+        'platelet', 'platelets', 'platelet count', 'thrombocyte',
+        'hemoglobin', 'hb', 'hgb', 'hematocrit', 'hct', 'pcv',
+        'mcv', 'mch', 'mchc', 'rdw', 'rdw-cv', 'rdw-sd',
+        'neutrophils', 'lymphocytes', 'monocytes', 'eosinophils', 'basophils', 'polymorphs',
+        'esr', 'erythrocyte sedimentation rate',
+        'blood sugar', 'fasting blood sugar', 'fbs', 'post prandial blood sugar', 'ppbs',
+        'random blood sugar', 'rbs', 'blood glucose', 'fasting glucose',
+        'creatinine', 'serum creatinine', 'bun', 'blood urea nitrogen', 'blood urea', 'urea', 'uric acid',
+        'egfr', 'gfr',
+        'cholesterol', 'total cholesterol', 'hdl', 'hdl cholesterol', 'ldl', 'ldl cholesterol',
+        'vldl', 'triglycerides', 'lipid profile',
+        'bilirubin', 'total bilirubin', 'direct bilirubin', 'indirect bilirubin',
+        'sgot', 'ast', 'sgpt', 'alt', 'alkaline phosphatase', 'alp', 'ggt', 'gamma gt',
+        'total protein', 'albumin', 'globulin', 'a/g ratio',
+        'tsh', 'thyroid stimulating hormone', 't3', 'total t3', 'free t3', 'ft3', 't4', 'total t4', 'free t4', 'ft4',
+        'vitamin d', '25-oh vitamin d', 'vitamin b12', 'b12', 'iron', 'serum iron', 'ferritin', 'tibc',
+        'crp', 'c-reactive protein', 'hs-crp', 'inr', 'prothrombin time', 'pt', 'aptt', 'ptt',
+        'calcium', 'potassium', 'sodium', 'chloride', 'magnesium', 'phosphorus',
+        'troponin', 'troponin i', 'troponin t', 'ck-mb', 'cpk', 'bnp', 'nt-probnp', 'd-dimer',
+        'psa', 'prostate specific antigen', 'amylase', 'lipase', 'microalbumin', 'urine protein', 'pus cells',
+        'epithelial cells', 'specific gravity', 'urobilinogen', 'ketones', 'occult blood', 'ige'
       ];
 
-      for (let line of lines) {
-        const trimmed = line.trim();
-        // Only inspect if line contains 'Lab' or a known lab test name
-        const hasLabContext = trimmed.match(/^(?:Lab|Test|Diagnostic)/i) || 
-                              knownLabNames.some(name => new RegExp('\\b' + name + '\\b', 'i').test(trimmed));
+      for (let rawLine of lines) {
+        let trimmed = rawLine.trim();
+        if (!trimmed) continue;
 
-        if (!hasLabContext) continue;
+        // Check if entering a lab/diagnostic section
+        if (/^(?:LABS?|LABORATORY|INVESTIGATIONS?|PATHOLOGY|TEST RESULTS?|DIAGNOSTIC FINDINGS?|PANEL|HEMOGRAM|COMPLETE BLOOD COUNT|BIOCHEMISTRY|LIPID PROFILE|RENAL FUNCTION|LIVER FUNCTION|REPORTS?)\s*[:\-]?$/i.test(trimmed)) {
+          inLabSection = true;
+          continue;
+        }
+        if (/^(?:MEDICATIONS?|CURRENT MEDICATIONS?|ALLERG(?:Y|IES)|VITALS?|PRESCRIPTIONS?|RX LIST|DOCTOR)\s*[:\-]?$/i.test(trimmed)) {
+          inLabSection = false;
+        }
 
-        const cleanLine = trimmed.replace(/^(?:Labs?|Diagnostics?|Results?)\s*[:\-]\s*/i, '');
-        const items = cleanLine.split(/[,;]/);
+        // Clean line prefixes
+        let clean = trimmed
+          .replace(/^[\|\*\•\–\—\>~#\+]\s*/, '')
+          .replace(/^\d+[\.\)\-]\s*/, '')
+          .replace(/^(?:Labs?|Diagnostics?|Results?|Test|Investigations?)\s*[:\-]\s*/i, '')
+          .trim();
+
+        if (!clean) continue;
+
+        const hasKnownName = knownLabNames.some(name => new RegExp('\\b' + name.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + '\\b', 'i').test(clean));
+
+        // Only parse if inLabSection OR line has known lab biomarker context
+        if (!inLabSection && !hasKnownName) continue;
+
+        // Split comma/semicolon delimited items on same line
+        const items = clean.split(/[,;]/);
 
         for (let item of items) {
           const itemTrimmed = item.trim();
-          const labMatch = itemTrimmed.match(/([A-Za-z0-9\s\/\-\(\)]+?)\s*[:=]\s*(\>|\<)?\s*(\d+(?:\.\d+)?\s*(?:%|mg\/dL|mL\/min(?:\/1\.73m²)?|INR|kU\/L|mIU\/L|mEq\/L|g\/dL)?)\s*(?:\[(.*?)\]|\((.*?)\))?/i);
+          if (!itemTrimmed || itemTrimmed.length < 3) continue;
 
-          if (labMatch) {
-            const testName = labMatch[1].trim();
-            const prefix = labMatch[2] || '';
-            const value = prefix + labMatch[3].trim();
-            const annotation = (labMatch[4] || labMatch[5] || '').toLowerCase();
+          let rawName = '';
+          let rest = '';
 
-            // Filter out false positives
-            if (!testName.match(/^(?:BP|DOB|Date|Phone|Rx|Age|Time|HR|SpO2|Refills|Dispense)/i) && testName.length > 2) {
-              let flag = 'Normal';
-              if (annotation.includes('high') || annotation.includes('critical') || annotation.includes('elevated')) {
-                flag = annotation.includes('critical') ? 'Critical' : 'High';
-              } else if (annotation.includes('low')) {
-                flag = 'Low';
+          const sepMatch = itemTrimmed.match(/^([A-Za-z0-9\s\/\-\(\)\.\%]+?)\s*[:=|\t]\s*(.+)$/);
+          if (sepMatch) {
+            rawName = sepMatch[1].trim();
+            rest = sepMatch[2].trim();
+          } else {
+            const hyphenMatch = itemTrimmed.match(/^([A-Za-z0-9\s\/\(\)\.\%]+?)\s+-\s+(.+)$/);
+            if (hyphenMatch) {
+              rawName = hyphenMatch[1].trim();
+              rest = hyphenMatch[2].trim();
+            } else {
+              const spaceMatch = itemTrimmed.match(/^([A-Za-z\s\/\-\(\)]+?)\s+(\d+(?:[\,\.]\d+)*\s*(?:[A-Za-z\/\%²³\^].*)?)$/);
+              if (spaceMatch) {
+                rawName = spaceMatch[1].trim();
+                rest = spaceMatch[2].trim();
               }
+            }
+          }
 
+          if (rawName && rest) {
+            // Filter out common false positives (headers, dates, metadata)
+            if (rawName.match(/^(?:BP|DOB|Date|Phone|Rx|Age|Time|HR|SpO2|Refills|Dispense|Patient|Doctor|Physician|Ward|Room|Bed|Gender|Sex|Address|Signature|Name)/i)) {
+              continue;
+            }
+            if (rawName.length < 2) continue;
+
+            // Extract reference range from parenthetical or bracketed block: (Ref: ...) or [Ref: ...]
+            let referenceRange = '';
+            const refMatch = rest.match(/[\(\[]\s*(?:Ref(?:erence)?(?:\s*Range)?\s*[:\.]?\s*)?([^\)\]]+)[\)\]]/i);
+            if (refMatch) {
+              referenceRange = refMatch[1].trim();
+            }
+
+            // Detect clinical flag (High / Low / Critical / Normal)
+            let flag = 'Normal';
+            const fullLineForFlag = (rest + ' ' + itemTrimmed).toLowerCase();
+            if (/\b(?:critical|panic|severe)\b/i.test(fullLineForFlag)) {
+              flag = 'Critical';
+            } else if (/\b(?:high|elevated|above normal|\*high|\(h\))\b/i.test(fullLineForFlag)) {
+              flag = 'High';
+            } else if (/\b(?:low|below normal|deficient|\*low|\(l\))\b/i.test(fullLineForFlag)) {
+              flag = 'Low';
+            }
+
+            // Remove the parenthetical ref block to cleanly parse value and units
+            const restWithoutRef = rest.replace(/[\(\[].*?[\)\]]/g, '').trim();
+
+            // Match numeric value (with optional prefix <, >, <=, >=) or qualitative value + units
+            const valMatch = restWithoutRef.match(/^([><=]=?)?\s*(\d+(?:[\,\.]\d+)*(?:\s*(?:x10\^?\d+(?:\/[A-Za-z]+)?|mil\/[A-Za-z]+|[A-Za-z\/\%²³\^\.\#]+(?:\/[A-Za-z0-9\.\^]+)*))?|\b(?:Positive|Negative|Normal|Reactive|Non-Reactive|Trace|Nil|Clear)\b)/i);
+
+            let valueStr = '';
+            if (valMatch) {
+              valueStr = valMatch[0].trim();
+            } else {
+              valueStr = restWithoutRef.replace(/\b(?:High|Low|Normal|Critical)\b/ig, '').trim();
+            }
+
+            if (!valueStr || valueStr.length < 1) continue;
+
+            // Normalize names
+            let testName = rawName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+            const lowerName = rawName.toLowerCase();
+            if (lowerName === 'h1bac' || lowerName.includes('hba1c') || lowerName.includes('h1bac') || lowerName.includes('glycated hemoglobin')) {
+              testName = 'HbA1c (Glycated Hemoglobin)';
+            } else if (lowerName === 'rbc' || lowerName === 'rbc count') {
+              testName = 'RBC Count';
+            } else if (lowerName === 'wbc' || lowerName === 'wbc count' || lowerName === 'tlc') {
+              testName = 'Total WBC Count';
+            } else if (lowerName === 'hb' || lowerName === 'hgb') {
+              testName = 'Hemoglobin (Hb)';
+            } else if (lowerName === 'fbs') {
+              testName = 'Fasting Blood Sugar (FBS)';
+            } else if (lowerName === 'ppbs') {
+              testName = 'Post Prandial Blood Sugar (PPBS)';
+            } else if (lowerName.includes('platelet')) {
+              testName = 'Platelet Count';
+            }
+
+            // Categorization
+            let category = 'Clinical Chemistry & Diagnostics';
+            if (lowerName.includes('rbc') || lowerName.includes('wbc') || lowerName.includes('platelet') || lowerName.includes('hemoglobin') || lowerName.includes('mcv') || lowerName.includes('mch') || lowerName.includes('esr') || lowerName.includes('hematocrit') || lowerName.includes('pcv') || lowerName.includes('neutrophil') || lowerName.includes('lymphocyte')) {
+              category = 'Hematology (Complete Hemogram)';
+            } else if (lowerName.includes('hba1c') || lowerName.includes('h1bac') || lowerName.includes('glucose') || lowerName.includes('sugar') || lowerName.includes('fbs') || lowerName.includes('ppbs')) {
+              category = 'Glycemic & Diabetic Profile';
+            } else if (lowerName.includes('cholesterol') || lowerName.includes('triglyceride') || lowerName.includes('hdl') || lowerName.includes('ldl') || lowerName.includes('lipid')) {
+              category = 'Lipid Profile';
+            } else if (lowerName.includes('creatinine') || lowerName.includes('urea') || lowerName.includes('bun') || lowerName.includes('egfr') || lowerName.includes('uric acid')) {
+              category = 'Renal Function (Kidney Panel)';
+            } else if (lowerName.includes('bilirubin') || lowerName.includes('sgot') || lowerName.includes('sgpt') || lowerName.includes('alt') || lowerName.includes('ast') || lowerName.includes('alp') || lowerName.includes('liver')) {
+              category = 'Hepatic (Liver Function Panel)';
+            } else if (lowerName.includes('tsh') || lowerName.includes('t3') || lowerName.includes('t4') || lowerName.includes('thyroid')) {
+              category = 'Thyroid & Endocrine';
+            } else if (lowerName.includes('vitamin') || lowerName.includes('iron') || lowerName.includes('ferritin') || lowerName.includes('calcium')) {
+              category = 'Vitamins & Essential Nutrients';
+            }
+
+            if (!seenTests.has(testName.toLowerCase())) {
+              seenTests.add(testName.toLowerCase());
               labs.push({
                 test_name: testName,
-                result_value: value,
-                reference_range: annotation || 'Normal Reference',
+                result_value: valueStr,
+                reference_range: referenceRange || 'Normal Reference',
                 flag: flag,
-                category: 'Clinical Chemistry & Diagnostics'
+                category: category
               });
             }
           }

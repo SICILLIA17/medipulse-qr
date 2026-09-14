@@ -8,6 +8,13 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Lucide Icons CDN -->
   <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- PDF.js for lossless digital PDF report parsing & canvas rendering -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
   <!-- Tesseract.js for in-browser OCR (with zero-failure fallback) -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <!-- Custom Styles -->
@@ -700,37 +707,13 @@
       <!-- Modal Body (Split Layout: Upload/Preview on Left, Extracted Entities on Right) -->
       <div class="flex-1 p-4 sm:p-6 overflow-y-auto space-y-5">
         
-        <!-- Step 1: Pre-loaded Demo Documents for Instant Zero-Friction Testing -->
-        <div class="bg-cyan-50/70 border border-cyan-200/80 rounded-2xl p-4">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-bold text-cyan-900 flex items-center gap-1.5">
-              <i data-lucide="sparkles" class="w-4 h-4 text-cyan-600"></i> One-Click Sample Medical Documents (Test Immediately):
-            </span>
-            <span class="text-[11px] text-cyan-700">Select any sample to transcribe instantly</span>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button onclick="app.loadSampleDocument('doc-rx-1')" class="text-left p-2.5 bg-white hover:bg-cyan-100/50 rounded-xl border border-cyan-200 transition text-xs shadow-sm">
-              <strong class="text-slate-900 block font-bold">1. Outpatient Rx Slip</strong>
-              <span class="text-[11px] text-slate-500">Metformin 1000mg, Lisinopril 20mg, Atorvastatin</span>
-            </button>
-            <button onclick="app.loadSampleDocument('doc-discharge-2')" class="text-left p-2.5 bg-white hover:bg-cyan-100/50 rounded-xl border border-cyan-200 transition text-xs shadow-sm">
-              <strong class="text-slate-900 block font-bold">2. ER Triage & Allergy Sheet</strong>
-              <span class="text-[11px] text-slate-500">EpiPen, Albuterol, Peanut Anaphylaxis</span>
-            </button>
-            <button onclick="app.loadSampleDocument('doc-cardio-3')" class="text-left p-2.5 bg-white hover:bg-cyan-100/50 rounded-xl border border-cyan-200 transition text-xs shadow-sm">
-              <strong class="text-slate-900 block font-bold">3. Anticoagulation Sheet</strong>
-              <span class="text-[11px] text-slate-500">Warfarin 5mg, INR 2.4, CKD Stage 3b</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Step 2: Upload Zone & Document Image Preview -->
+        <!-- Upload Zone & Document Image Preview -->
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
           
           <!-- Left Column: Document Image & OCR Raw Text -->
           <div class="space-y-3">
             <div class="flex items-center justify-between gap-2 flex-wrap">
-              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">Document Scan / Photo</label>
+              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">Document Scan / Photo / PDF</label>
               <div class="flex items-center gap-1.5 flex-wrap">
                 <!-- Open Live Camera -->
                 <button type="button" onclick="app.startDocumentCamera()" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 flex items-center gap-1 transition shadow-sm">
@@ -741,10 +724,15 @@
                   <i data-lucide="camera" class="w-3.5 h-3.5 text-cyan-600"></i> Snap Photo
                   <input type="file" id="docCameraDirectInput" accept="image/*" capture="environment" class="hidden" onchange="app.handleDocumentFileUpload(event)">
                 </label>
-                <!-- Upload Existing File -->
+                <!-- Upload PDF Document -->
+                <label class="cursor-pointer px-2.5 py-1 text-xs font-semibold rounded-lg bg-red-50 text-red-800 border border-red-200 hover:bg-red-100 flex items-center gap-1 transition shadow-sm">
+                  <i data-lucide="file-text" class="w-3.5 h-3.5 text-red-600"></i> Upload PDF
+                  <input type="file" id="docPdfUploadInput" accept="application/pdf,.pdf" class="hidden" onchange="app.handleDocumentFileUpload(event)">
+                </label>
+                <!-- Upload Image / Scan -->
                 <label class="cursor-pointer px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 flex items-center gap-1 transition shadow-sm">
-                  <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload File
-                  <input type="file" id="docUploadInput" accept="image/*" class="hidden" onchange="app.handleDocumentFileUpload(event)">
+                  <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload Image
+                  <input type="file" id="docUploadInput" accept="application/pdf,image/*,.pdf" class="hidden" onchange="app.handleDocumentFileUpload(event)">
                 </label>
               </div>
             </div>
@@ -752,8 +740,8 @@
             <!-- Image preview or Document visual canvas -->
             <div id="docPreviewContainer" class="relative bg-slate-900 text-slate-200 rounded-2xl p-3 min-h-[220px] max-h-[280px] overflow-hidden border border-slate-800 flex flex-col justify-center items-center text-center">
               <div id="docPlaceholder" class="space-y-2 text-slate-400 p-4">
-                <i data-lucide="file-text" class="w-10 h-10 mx-auto opacity-50"></i>
-                <p class="text-xs font-medium">Click <strong>Open Camera</strong> to scan a physical document, or upload any prescription or lab report image.</p>
+                <i data-lucide="file-up" class="w-10 h-10 mx-auto opacity-50"></i>
+                <p class="text-xs font-medium">Click <strong>Open Camera</strong> to scan a physical document, or <strong>Upload PDF / Image</strong> to parse lab reports and prescriptions.</p>
               </div>
               <img id="docImagePreview" class="hidden max-h-[240px] rounded-lg object-contain shadow" alt="Document Preview">
             </div>
@@ -794,7 +782,7 @@
 
             <div id="extractedEntitiesContainer" class="flex-1 bg-slate-50/80 rounded-2xl border border-slate-200 p-3.5 space-y-4 max-h-[460px] overflow-y-auto">
               <div class="text-center py-16 text-xs text-slate-400">
-                No document loaded yet. Choose a sample or upload an image to view parsed clinical entities.
+                No document loaded yet. Snap a photo, open camera, or upload a PDF/image to extract medical records.
               </div>
             </div>
           </div>
@@ -970,6 +958,21 @@
             <i data-lucide="clipboard-list" class="w-3.5 h-3.5 text-slate-600"></i> Diagnosis / Medical Conditions
           </span>
           <input type="text" id="manualConditionsInput" placeholder="e.g. Type 2 Diabetes, Hypertension (comma separated)" class="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg">
+        </div>
+
+        <!-- Section E: Diagnostic Labs & Biomarkers (HbA1c, RBC, WBC, Platelets, etc.) -->
+        <div class="space-y-2 pt-2 border-t border-slate-100">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-cyan-900 uppercase tracking-wider flex items-center gap-1.5">
+              <i data-lucide="flask-conical" class="w-3.5 h-3.5 text-cyan-600"></i> Lab Reports & Diagnostic Biomarkers
+            </span>
+            <button type="button" onclick="app.addManualLabRow()" class="text-xs font-bold text-cyan-700 hover:text-cyan-900 flex items-center gap-1 bg-cyan-50 hover:bg-cyan-100 px-2 py-1 rounded-lg border border-cyan-200">
+              <i data-lucide="plus" class="w-3 h-3"></i> Add Lab / Biomarker
+            </button>
+          </div>
+          <div id="manualLabsContainer" class="space-y-2">
+            <!-- Dynamic lab rows -->
+          </div>
         </div>
 
       </div>
