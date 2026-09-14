@@ -729,21 +729,46 @@
           
           <!-- Left Column: Document Image & OCR Raw Text -->
           <div class="space-y-3">
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
               <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">Document Scan / Photo</label>
-              <label class="cursor-pointer text-xs font-semibold text-teal-700 hover:text-teal-800 flex items-center gap-1">
-                <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload Your Own Document
-                <input type="file" id="docUploadInput" accept="image/*" class="hidden" onchange="app.handleDocumentFileUpload(event)">
-              </label>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <!-- Open Live Camera -->
+                <button type="button" onclick="app.startDocumentCamera()" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 flex items-center gap-1 transition shadow-sm">
+                  <i data-lucide="camera" class="w-3.5 h-3.5 text-emerald-600"></i> Open Camera
+                </button>
+                <!-- Native Camera / Mobile Photo -->
+                <label class="cursor-pointer px-2.5 py-1 text-xs font-semibold rounded-lg bg-cyan-50 text-cyan-800 border border-cyan-200 hover:bg-cyan-100 flex items-center gap-1 transition shadow-sm">
+                  <i data-lucide="camera" class="w-3.5 h-3.5 text-cyan-600"></i> Snap Photo
+                  <input type="file" id="docCameraDirectInput" accept="image/*" capture="environment" class="hidden" onchange="app.handleDocumentFileUpload(event)">
+                </label>
+                <!-- Upload Existing File -->
+                <label class="cursor-pointer px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 flex items-center gap-1 transition shadow-sm">
+                  <i data-lucide="upload" class="w-3.5 h-3.5"></i> Upload File
+                  <input type="file" id="docUploadInput" accept="image/*" class="hidden" onchange="app.handleDocumentFileUpload(event)">
+                </label>
+              </div>
             </div>
 
             <!-- Image preview or Document visual canvas -->
-            <div id="docPreviewContainer" class="bg-slate-900 text-slate-200 rounded-2xl p-4 min-h-[220px] max-h-[260px] overflow-y-auto border border-slate-800 flex flex-col justify-center items-center text-center">
-              <div id="docPlaceholder" class="space-y-2 text-slate-400">
-                <i data-lucide="file-image" class="w-10 h-10 mx-auto opacity-50"></i>
-                <p class="text-xs font-medium">Select a sample document above or drag & drop any prescription slip / lab report.</p>
+            <div id="docPreviewContainer" class="relative bg-slate-900 text-slate-200 rounded-2xl p-3 min-h-[220px] max-h-[280px] overflow-hidden border border-slate-800 flex flex-col justify-center items-center text-center">
+              <div id="docPlaceholder" class="space-y-2 text-slate-400 p-4">
+                <i data-lucide="file-text" class="w-10 h-10 mx-auto opacity-50"></i>
+                <p class="text-xs font-medium">Click <strong>Open Camera</strong> to scan a physical document, or upload any prescription or lab report image.</p>
               </div>
               <img id="docImagePreview" class="hidden max-h-[240px] rounded-lg object-contain shadow" alt="Document Preview">
+            </div>
+
+            <!-- OCR Progress Bar (Hidden by default) -->
+            <div id="ocrProgressContainer" class="hidden bg-slate-100 border border-slate-200 rounded-xl p-2.5 space-y-1.5 animate-in fade-in duration-150">
+              <div class="flex items-center justify-between text-xs">
+                <span id="ocrStatusText" class="font-bold text-teal-800 flex items-center gap-1.5">
+                  <i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Transcribing document image...
+                </span>
+                <span id="ocrProgressPercent" class="font-mono text-slate-600 font-bold">0%</span>
+              </div>
+              <div class="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                <div id="ocrProgressBar" class="bg-teal-600 h-1.5 rounded-full transition-all duration-200" style="width: 0%"></div>
+              </div>
             </div>
 
             <!-- OCR Raw Transcribed Text Box (Editable if needed) -->

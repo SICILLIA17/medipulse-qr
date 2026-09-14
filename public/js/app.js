@@ -18,6 +18,8 @@ class MediPulseApp {
     this.clinicalParser = new ClinicalParser();
     this.extractedEntitiesDraft = null;
     this.currentDocImageData = null;
+    this.docCameraStream = null;
+    this.docCameraFacing = 'environment';
   }
 
   async init() {
@@ -839,7 +841,193 @@ class MediPulseApp {
   }
 
   closeTranscriptionModal() {
+    this.stopDocumentCamera();
     document.getElementById('transcriptionModal').classList.add('hidden');
+  }
+
+  async startDocumentCamera(facing = this.docCameraFacing) {
+    this.docCameraFacing = facing;
+    const container = document.getElementById('docPreviewContainer');
+    if (!container) return;
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this.showToast('Camera not supported in this browser. Please use Upload.', 'error');
+      return;
+    }
+
+    this.stopDocumentCamera();
+
+    container.innerHTML = `
+      <div class="relative w-full h-[240px] rounded-xl overflow-hidden bg-black flex items-center justify-center">
+        <video id="docCameraVideo" playsinline autoplay muted class="w-full h-full object-cover"></video>
+        <!-- Overlay Guide Box -->
+        <div class="absolute inset-3 border-2 border-dashed border-emerald-400/80 rounded-xl pointer-events-none flex flex-col justify-between p-2 shadow-sm">
+          <span class="text-[10px] font-mono font-bold text-emerald-300 bg-black/70 px-2 py-0.5 rounded self-start">
+            Align prescription or document inside frame
+          </span>
+        </div>
+        <!-- Camera Toolbar -->
+        <div class="absolute bottom-2.5 inset-x-0 flex items-center justify-center gap-2">
+          <button type="button" onclick="app.captureDocumentFromCamera()" class="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold shadow-lg flex items-center gap-1.5 transition active:scale-95">
+            <i data-lucide="camera" class="w-4 h-4"></i> Snap Document
+          </button>
+          <button type="button" onclick="app.switchDocumentCamera()" title="Switch Front/Back" class="p-1.5 bg-slate-900/80 hover:bg-slate-900 text-white rounded-xl border border-slate-700 shadow flex items-center justify-center transition">
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+          </button>
+          <button type="button" onclick="app.stopDocumentCamera()" title="Cancel" class="px-3 py-1.5 bg-slate-900/80 hover:bg-slate-900 text-slate-300 hover:text-white rounded-xl border border-slate-700 text-xs font-semibold shadow transition">
+            Cancel
+          </button>
+        </div>
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
+
+    try {
+      const constraints = {
+        video: {
+          facingMode: { ideal: this.docCameraFacing },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        }
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.docCameraStream = stream;
+      const video = document.getElementById('docCameraVideo');
+      if (video) {
+        video.srcObject = stream;
+        await video.play();
+      }
+    } catch (err) {
+      console.warn('Document camera access error:', err);
+      this.stopDocumentCamera();
+      this.showToast('Camera access declined or unavailable.', 'error');
+    }
+  }
+
+  switchDocumentCamera() {
+    this.docCameraFacing = this.docCameraFacing === 'environment' ? 'user' : 'environment';
+    this.startDocumentCamera(this.docCameraFacing);
+  }
+
+  stopDocumentCamera() {
+    if (this.docCameraStream) {
+      this.docCameraStream.getTracks().forEach(t => t.stop());
+      this.docCameraStream = null;
+    }
+    const container = document.getElementById('docPreviewContainer');
+    const video = document.getElementById('docCameraVideo');
+    if (video) {
+      video.srcObject = null;
+      if (container && !this.currentDocImageData) {
+        container.innerHTML = `
+          <div id="docPlaceholder" class="space-y-2 text-slate-400 p-4">
+            <i data-lucide="file-text" class="w-10 h-10 mx-auto opacity-50"></i>
+            <p class="text-xs font-medium">Click <strong>Open Camera</strong> to scan a physical document, or upload any prescription or lab report image.</p>
+          </div>
+        `;
+        if (window.lucide) lucide.createIcons();
+      }
+    }
+  }
+
+  captureDocumentFromCamera() {
+    const video = document.getElementById('docCameraVideo');
+    if (!video || !this.docCameraStream) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    this.playScanBeep();
+    this.stopDocumentCamera();
+    this.processDocumentImage(imgData);
+  }
+
+  async handleDocumentFileUpload(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      this.processDocumentImage(e.target.result);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  }
+
+  async processDocumentImage(imgData) {
+    this.currentDocImageData = imgData;
+
+    const preview = document.getElementById('docPreviewContainer');
+    if (preview) {
+      preview.innerHTML = `
+        <div class="relative w-full h-[240px] flex items-center justify-center">
+          <img src="${imgData}" class="max-h-[220px] rounded-xl object-contain mx-auto shadow-md" alt="Document Upload">
+          <div class="absolute top-2 right-2 flex gap-1.5">
+            <button type="button" onclick="app.startDocumentCamera()" class="px-2 py-1 bg-black/70 hover:bg-black/90 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow">
+              <i data-lucide="camera" class="w-3.5 h-3.5 text-emerald-400"></i> Retake
+            </button>
+          </div>
+        </div>
+      `;
+      if (window.lucide) lucide.createIcons();
+    }
+
+    const progressContainer = document.getElementById('ocrProgressContainer');
+    const progressBar = document.getElementById('ocrProgressBar');
+    const progressPercent = document.getElementById('ocrProgressPercent');
+    const statusText = document.getElementById('ocrStatusText');
+
+    if (progressContainer) {
+      progressContainer.classList.remove('hidden');
+      if (progressBar) progressBar.style.width = '15%';
+      if (progressPercent) progressPercent.textContent = '15%';
+      if (statusText) statusText.innerHTML = `<i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin text-teal-600"></i> Initializing OCR engine...`;
+      if (window.lucide) lucide.createIcons();
+    }
+
+    // Client-side OCR via Tesseract.js
+    if (window.Tesseract) {
+      try {
+        const worker = await Tesseract.createWorker('eng', 1, {
+          logger: m => {
+            if (m.status === 'recognizing text' && m.progress !== undefined) {
+              const pct = Math.min(99, Math.round(m.progress * 100));
+              if (progressBar) progressBar.style.width = `${pct}%`;
+              if (progressPercent) progressPercent.textContent = `${pct}%`;
+              if (statusText) statusText.innerHTML = `<i data-lucide="sparkles" class="w-3.5 h-3.5 text-teal-600"></i> Recognizing text... ${pct}%`;
+            }
+          }
+        });
+
+        const result = await worker.recognize(imgData);
+        await worker.terminate();
+
+        const extractedText = (result && result.data && result.data.text) ? result.data.text.trim() : '';
+
+        if (progressContainer) {
+          progressContainer.classList.add('hidden');
+        }
+
+        if (extractedText.length > 5) {
+          document.getElementById('rawTranscriptionText').value = extractedText;
+          this.reparseTranscriptionText();
+          this.showToast('Document transcribed successfully!', 'success');
+          return;
+        }
+      } catch (ocrErr) {
+        console.warn('Tesseract OCR error:', ocrErr);
+      }
+    }
+
+    if (progressContainer) {
+      progressContainer.classList.add('hidden');
+    }
+
+    this.showToast('Image captured! You can review or edit the text box directly.', 'success');
   }
 
   loadSampleDocument(docId) {
@@ -867,47 +1055,6 @@ class MediPulseApp {
 
     this.reparseTranscriptionText();
     this.showToast(`Loaded sample document: ${sample.title}`, 'success');
-  }
-
-  async handleDocumentFileUpload(event) {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-
-    this.showToast('Processing document image...', 'success');
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const imgData = e.target.result;
-      this.currentDocImageData = imgData;
-
-      const preview = document.getElementById('docPreviewContainer');
-      if (preview) {
-        preview.innerHTML = `<img src="${imgData}" class="max-h-[220px] rounded-xl object-contain mx-auto shadow" alt="Document Upload">`;
-      }
-
-      // If Tesseract is available, attempt client-side OCR
-      if (window.Tesseract) {
-        try {
-          this.showToast('Running client-side OCR transcription...', 'success');
-          const result = await Tesseract.recognize(imgData, 'eng');
-          if (result && result.data && result.data.text && result.data.text.trim().length > 10) {
-            document.getElementById('rawTranscriptionText').value = result.data.text;
-            this.reparseTranscriptionText();
-            this.showToast('OCR Transcription complete!', 'success');
-            return;
-          }
-        } catch (ocrErr) {
-          console.warn('Tesseract OCR error:', ocrErr);
-        }
-      }
-
-      // Fallback: If OCR text wasn't detected from raw image pixels, supply sample prescription template for rapid review
-      const fallbackSample = window.SAMPLE_MEDICAL_DOCUMENTS[0].rawText;
-      document.getElementById('rawTranscriptionText').value = fallbackSample;
-      this.reparseTranscriptionText();
-      this.showToast('Image uploaded. Ready for clinical review.', 'success');
-    };
-    reader.readAsDataURL(file);
   }
 
   reparseTranscriptionText() {
