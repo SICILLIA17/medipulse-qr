@@ -101,17 +101,13 @@ Run the test suite at any time:
 
 ---
 
-## ☁️ Cloudflare Pages Hosting
+## ☁️ Live Production Deployment
 
-This repository is optimized for deployment on **Cloudflare Pages**:
+- **Live URL**: 👉 **[https://shreshtha.pages.dev](https://shreshtha.pages.dev)**
+- **Edge Database**: Cloudflare D1 Persistent SQLite (`medipulse-db`)
+- **AI Vision Engine**: Cloudflare Workers AI (`@cf/meta/llama-3.2-11b-vision-instruct`)
+- **CI/CD**: Auto-deploys on every `git push` to `main` via Cloudflare Pages.
 
-1. In Cloudflare Dashboard, go to **Workers & Pages** ➔ **Create application** ➔ **Pages** ➔ **Connect to Git**.
-2. Select repository: `SICILLIA17/medipulse-qr`.
-3. Set build configuration:
-   - **Framework preset**: None
-   - **Build command**: (leave empty)
-   - **Build output directory**: `public`
-4. Deploy!
+Cloudflare Pages automatically serves the static frontend from `public/`, routes client-side URLs via `public/_redirects`, and executes serverless edge APIs located in `functions/api/[[path]].js`.
 
-Cloudflare Pages automatically serves the static frontend from `public/`, routes client-side URLs via `public/_redirects`, and executes serverless edge APIs located in `functions/api/[[path]].js`. Every future `git push` to `main` will automatically trigger a new deployment on Cloudflare!
 
